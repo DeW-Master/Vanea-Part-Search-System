@@ -1,0 +1,360 @@
+# ============================================
+# van.ea 车辆零件智能查询系统 - Docker Swarm Stack
+# 版本: v2.0.0 (Phase 3)
+# ============================================
+# 用途: 多副本高可用生产部署 (Docker Swarm Mode)
+#
+# 使用前准备:
+#   1. 初始化 Swarm 集群:
+#      docker swarm init --advertise-addr <MANAGER-IP>
+#      # 在其他节点执行: docker swarm join ...
+#
+#   2. 创建 overlay 网络 (如不存在):
+#      docker network create --driver overlay --attachable part-search-net
+#
+#   3. 设置 secrets (生产环境推荐):
+#      echo "admin2026" | docker secret create van_ea_admin_password -
+#      echo "random-secret-key-xxx" | docker secret create van_ea_secret_key -
+#      echo "van_ea_2026" | docker secret create van_ea_postgres_password -
+#
+#   4. 部署 stack:
+#      docker stack deploy -c docker-stack.yml van-ea
+#
+#   5. 查看状态:
+#      docker stack services van-ea
+#      docker stack ps van-ea --no-trunc
+#      docker service logs van-ea_part-search -f
+#
+#   6. 扩容缩容:
+#      docker service scale van-ea_part-search=5
+#
+#   7. 更新部署 (零停机):
+#      docker stack deploy -c docker-stack.yml van-ea
+#
+#   8. 卸载:
+#      docker stack rm van-ea
+# ============================================
+
+version: "3.8"
+
+services:
+  # ---------- Web 应用 (Flask, 多副本 + 滚动更新) ----------
+  part-search:
+    image: vanea/part-search:v2.0.0
+    # build: .  # stack deploy 不支持 build，需预先 push 到 registry
+    environment:
+      - ADMIN_PASSWORD_FILE=/run/secrets/van_ea_admin_password
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin2026}
+      - SECRET_KEY_FILE=/run/secrets/van_ea_secret_key
+      - SECRET_KEY=${SECRET_KEY:-parts-search-secret-key-2026}
+      - OLLAMA_URLS=${OLLAMA_URLS:-http://ollama-1:11434,http://ollama-2:11434}
+      - OLLAMA_LB_STRATEGY=${OLLAMA_LB_STRATEGY:-least_conn}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
+      - FLASK_HOST=0.0.0.0
+      - FLASK_PORT=5000
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_ENABLED=true
+      - CACHE_TTL=300
+      - DELTA_REFRESH_INTERVAL=300
+      - DB_TYPE=${DB_TYPE:-postgresql}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=van_ea
+      - POSTGRES_PASSWORD_FILE=/run/secrets/van_ea_postgres_password
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-van_ea_2026}
+      - POSTGRES_DB=van_ea_parts
+      - SESSION_TYPE=redis
+      - SESSION_LIFETIME_SECONDS=86400
+      - METRICS_ENABLED=true
+      - LEADER_ELECTION_ENABLED=true
+      - INSTANCE_ID=van-ea-{{.Task.Slot}}
+    volumes:
+      - part_search_data:/app/data
+    networks:
+      - part-search-net
+    # secrets:
+    #   - van_ea_admin_password
+    #   - van_ea_secret_key
+    #   - van_ea_postgres_password
+    deploy:
+      mode: replicated
+      replicas: ${WEB_REPLICAS:-3}
+      # 节点约束: 只在 worker 节点部署，避免占用 manager
+      placement:
+        constraints:
+          - node.role == worker
+        preferences:
+          - spread: node.id
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+      # 滚动更新策略: 1个1个更新，间隔 15s
+      update_config:
+        parallelism: 1
+        delay: 15s
+        failure_action: rollback
+        monitor: 30s
+        max_failure_ratio: 0.2
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: pause
+        monitor: 30s
+        order: stop-first
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+        window: 120s
+      # 健康检查通过后才加入 LB
+      labels:
+        - "traefik.enable=false"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+
+  # ---------- Redis (Sentinel 推荐, 单机模式用于中小部署) ----------
+  redis:
+    image: redis:7-alpine
+    command: >
+      redis-server
+      --appendonly yes
+      --save 60 100
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+      --tcp-keepalive 60
+      --timeout 300
+    volumes:
+      - redis_data:/data
+    networks:
+      - part-search-net
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # ---------- PostgreSQL (主库, 推荐生产用主从或 CloudSQL) ----------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=van_ea
+      - POSTGRES_PASSWORD_FILE=/run/secrets/van_ea_postgres_password
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-van_ea_2026}
+      - POSTGRES_DB=van_ea_parts
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # secrets:
+    #   - van_ea_postgres_password
+    networks:
+      - part-search-net
+    command: >
+      postgres
+      -c max_connections=300
+      -c shared_buffers=1GB
+      -c effective_cache_size=3GB
+      -c maintenance_work_mem=128MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=4MB
+      -c min_wal_size=2GB
+      -c max_wal_size=8GB
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.db == true
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+      restart_policy:
+        condition: any
+        delay: 10s
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U van_ea -d van_ea_parts"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ---------- Nginx (入口, 全局单实例) ----------
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: host
+      # - target: 443
+      #   published: 443
+      #   protocol: tcp
+      #   mode: host
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend:/usr/share/nginx/static:ro
+    networks:
+      - part-search-net
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+      update_config:
+        failure_action: rollback
+      restart_policy:
+        condition: any
+        delay: 3s
+        max_attempts: 5
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ---------- Prometheus (监控抓取, 单实例) ----------
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    networks:
+      - part-search-net
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ---------- Grafana (可视化, 单实例) ----------
+  grafana:
+    image: grafana/grafana-oss:11.2.0
+    # ports:
+    #   - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin2026}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost/grafana/}
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    user: "472"
+    networks:
+      - part-search-net
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+# secrets:
+#   van_ea_admin_password:
+#     external: true
+#   van_ea_secret_key:
+#     external: true
+#   van_ea_postgres_password:
+#     external: true
+
+volumes:
+  part_search_data:
+    driver: local
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  part-search-net:
+    driver: overlay
+    attachable: true
+    ipam:
+      config:
+        - subnet: 10.20.0.0/16

@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>van.ea 车辆零件智能查询系统 - 操作指导文档</title>
+<style>
+:root {
+  --primary: #0066cc;
+  --primary-dark: #004c99;
+  --bg: #f5f7fa;
+  --card-bg: #ffffff;
+  --text: #1a1a1a;
+  --text-secondary: #666;
+  --border: #e0e0e0;
+  --code-bg: #f8f9fa;
+  --success: #2e7d32;
+  --warning: #e65100;
+  --danger: #c62828;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans SC', sans-serif;
+  background: var(--bg); color: var(--text); line-height: 1.7;
+}
+.container { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
+header {
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  color: white; padding: 50px 20px; text-align: center;
+}
+header h1 { font-size: 28px; margin-bottom: 8px; }
+header .version { font-size: 14px; opacity: 0.8; }
+header .meta { font-size: 12px; opacity: 0.6; margin-top: 8px; }
+nav {
+  background: var(--card-bg); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 100; padding: 0 20px;
+}
+nav ul { list-style: none; display: flex; gap: 8px; max-width: 900px; margin: 0 auto; flex-wrap: wrap; }
+nav a {
+  display: block; padding: 12px 16px; text-decoration: none;
+  color: var(--text-secondary); font-size: 14px; font-weight: 500;
+  border-bottom: 2px solid transparent; transition: all 0.2s;
+}
+nav a:hover { color: var(--primary); border-bottom-color: var(--primary); }
+section { margin-bottom: 40px; }
+h2 {
+  font-size: 22px; margin-bottom: 16px; padding-bottom: 8px;
+  border-bottom: 2px solid var(--primary); color: var(--primary);
+}
+h3 { font-size: 17px; margin: 20px 0 10px; color: var(--text); }
+p { margin-bottom: 10px; color: var(--text); }
+ul, ol { margin: 10px 0 10px 24px; }
+li { margin-bottom: 6px; }
+code {
+  background: var(--code-bg); padding: 2px 6px; border-radius: 4px;
+  font-family: 'Fira Code', Consolas, 'Courier New', monospace;
+  font-size: 13px; color: var(--danger);
+}
+pre {
+  background: var(--code-bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 16px; overflow-x: auto; margin: 12px 0;
+}
+pre code { background: none; padding: 0; color: var(--text); }
+.card {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 20px; margin: 16px 0;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.card-title { font-weight: 700; margin-bottom: 8px; font-size: 15px; }
+.note {
+  border-left: 4px solid var(--primary); background: #e3f2fd;
+  padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 12px 0;
+}
+.note-warning {
+  border-left-color: var(--warning); background: #fff3e0;
+}
+.note-success {
+  border-left-color: var(--success); background: #e8f5e9;
+}
+table {
+  width: 100%; border-collapse: collapse; margin: 12px 0;
+  font-size: 14px;
+}
+th, td { border: 1px solid var(--border); padding: 10px 12px; text-align: left; }
+th { background: var(--primary); color: white; font-weight: 600; }
+tr:nth-child(even) { background: #f8f9fa; }
+.tag {
+  display: inline-block; padding: 2px 10px; border-radius: 12px;
+  font-size: 12px; font-weight: 600;
+}
+.tag-docker { background: #e3f2fd; color: #1565c0; }
+.tag-config { background: #e8f5e9; color: #2e7d32; }
+.tag-ai { background: #f3e5f5; color: #7b1fa2; }
+.footer {
+  text-align: center; padding: 30px 20px; color: var(--text-secondary);
+  font-size: 13px; border-top: 1px solid var(--border); margin-top: 40px;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>van.ea 车辆零件智能查询系统</h1>
+  <div class="meta">文档更新日期: 2026-08-17 | 研发组</div>
+</header>
+
+<nav>
+  <ul>
+    <li><a href="#overview">系统概述</a></li>
+    <li><a href="#features">功能总览</a></li>
+    <li><a href="#structure">项目结构</a></li>
+    <li><a href="#docker">Docker部署</a></li>
+    <li><a href="#config">环境变量配置</a></li>
+    <li><a href="#usage">系统使用</a></li>
+    <li><a href="#ai">AI模型管理</a></li>
+    <li><a href="#monitoring">系统监控</a></li>
+    <li><a href="#concurrency">并发控制</a></li>
+    <li><a href="#troubleshooting">故障排查</a></li>
+    <li><a href="#version">版本控制</a></li>
+  </ul>
+</nav>
+
+<div class="container">
+
+<section id="overview">
+  <h2>系统概述</h2>
+  <p>van.ea 车辆零件智能查询系统是奔驰FBAC研发部门的车辆零件数据管理平台，支持多Excel文件导入、动态数据库管理、自然语言智能查询、阶段Delta对比和AI智能体问答。系统采用MVC架构，支持中英双语界面，可切换本地Ollama模型或线上云端API模型。</p>
+  <div class="card">
+    <div class="card-title">核心功能</div>
+    <ul>
+      <li><strong>数据导入</strong>：支持 .xlsx/.xlsm 文件上传，BOM物料清单与补充文件分类型管理</li>
+      <li><strong>智能查询</strong>：按零件号搜索、按任意字段搜索、自然语言提问</li>
+      <li><strong>AI智能体</strong>：支持复杂条件搜索、对比查询、差异高亮，可中途停止生成</li>
+      <li><strong>阶段Delta</strong>：pre-TO/TO1/TO2三阶段对比，PN+ZGS组合匹配，差异高亮下钻</li>
+      <li><strong>数据统计</strong>：文件贡献饼图（记录数/列数），文件大小与上传时间统计</li>
+      <li><strong>系统监控</strong>：GPU/CPU/内存/磁盘实时监控，请求速率与并发数趋势图</li>
+      <li><strong>并发控制</strong>：默认上限3人，SSE实时通知，超员排队等待</li>
+      <li><strong>模型管理</strong>：本地Ollama模型下载/切换/删除，云端API配置/测试/切换</li>
+      <li><strong>双语界面</strong>：中文/英文实时切换，含搜索历史记录</li>
+    </ul>
+  </div>
+</section>
+
+<section id="features">
+  <h2>功能总览</h2>
+
+  <h3>v1.3.0 新增功能（2026-08-14）</h3>
+  <table>
+    <tr><th>功能</th><th>说明</th><th>入口</th></tr>
+    <tr><td>并发搜索控制</td><td>默认上限3人，支持后台自定义，SSE实时通知超员/释放状态</td><td>主页顶部通知条 / 后台管理</td></tr>
+    <tr><td>系统监控页面</td><td>GPU/CPU/内存/磁盘实时指标，请求速率与活跃搜索趋势图</td><td><code>/monitoring</code></td></tr>
+    <tr><td>文件贡献饼图</td><td>数据库统计页新增记录数和列数贡献饼图</td><td>后台 → 数据库统计</td></tr>
+    <tr><td>文件详情列表</td><td>展示每个文件的大小、上传时间、记录数、列数、占比</td><td>后台 → 数据库统计</td></tr>
+    <tr><td>Delta详情对比</td><td>两阶段并排对比，差异字段高亮（红色=旧值，绿色=新值，金色=变化行）</td><td>阶段Delta → 查看详情</td></tr>
+    <tr><td>FBAC R&D Logo</td><td>替换左上角品牌标识为FBAC R&D电动车logo</td><td>所有页面左上角</td></tr>
+    <tr><td>动态建议问题</td><td>智能体建议问题每次刷新随机生成，包含真实零件号</td><td>智能体问答页面</td></tr>
+  </table>
+
+  <h3>已有功能</h3>
+  <table>
+    <tr><th>功能</th><th>说明</th><th>版本</th></tr>
+    <tr><td>动态数据库</td><td>多Excel文件上传，表头自动合并，统一查询</td><td>v1.0.0</td></tr>
+    <tr><td>零件号搜索</td><td>按PN精确搜索，支持模糊匹配，结果导出CSV</td><td>v1.0.0</td></tr>
+    <tr><td>管理后台</td><td>密码认证，文件管理，列名映射，数据库统计</td><td>v1.0.0</td></tr>
+    <tr><td>双语界面</td><td>中文/英文一键切换，i18n国际化</td><td>v1.0.0</td></tr>
+    <tr><td>AI智能体</td><td>自然语言查询，多轮对话，流式输出，可停止</td><td>v1.1.0</td></tr>
+    <tr><td>模型管理</td><td>本地Ollama模型下载/切换，云端API配置</td><td>v1.1.0</td></tr>
+    <tr><td>阶段Delta</td><td>pre-TO/TO1/TO2阶段物料差异对比</td><td>v1.1.0</td></tr>
+    <tr><td>BOM/补充文件</td><td>区分BOM物料清单和补充信息文件上传</td><td>v1.2.0</td></tr>
+    <tr><td>PN+ZGS匹配</td><td>Delta匹配采用PN+ZGS组合对比逻辑</td><td>v1.2.0</td></tr>
+    <tr><td>GPU优化</td><td>Flash Attention、KV Cache量化加速推理</td><td>v1.2.0</td></tr>
+  </table>
+</section>
+
+<section id="structure">
+  <h2>项目结构</h2>
+  <pre><code>part-search-system/
+├── app.py                 # 主应用入口（Flask路由、API端点）
+├── agent.py               # AI智能体模块（Ollama + Cloud + Rule-based）
+├── config.py              # 系统配置（支持环境变量）
+├── database.py            # 数据库管理模块（SQLite）
+├── requirements.txt       # Python依赖
+├── Dockerfile             # Docker镜像构建文件
+├── docker-compose.yml     # Docker Compose编排文件
+├── .dockerignore          # Docker构建排除列表
+├── start.bat              # Windows本地启动脚本
+├── operation-guide.html   # 本操作指导文档
+├── static/
+│   ├── index.html         # 前端查询页面
+│   └── admin.html         # 管理后台页面
+└── data/                  # 数据目录（Docker卷挂载）
+    ├── parts.db           # SQLite数据库文件
+    ├── cloud_config.json  # 云端API配置（自动生成）
+    └── uploads/           # 上传文件临时目录</code></pre>
+</section>
+
+<section id="docker">
+  <h2>Docker部署</h2>
+
+  <h3>前置条件</h3>
+  <ul>
+    <li>已安装 <strong>Docker Engine</strong>（20.10+）和 <strong>Docker Compose</strong>（v2+）</li>
+    <li>如需使用本地AI模型，需在宿主机上运行 <strong>Ollama</strong>（https://ollama.ai）</li>
+    <li>如需使用云端AI模型，需准备对应服务商的API Key</li>
+  </ul>
+
+  <h3>方式一：Docker Compose（推荐）</h3>
+  <div class="note">这是最简单的部署方式，一条命令即可启动完整服务。</div>
+  <pre><code># 进入项目目录
+cd part-search-system
+
+# 构建并启动（首次运行）
+docker-compose up -d --build
+
+# 查看运行状态
+docker-compose ps
+
+# 查看实时日志
+docker-compose logs -f
+
+# 停止服务
+docker-compose down
+
+# 重新构建（代码更新后）
+docker-compose up -d --build</code></pre>
+
+  <h3>方式二：Docker命令手动部署</h3>
+  <pre><code># 构建镜像
+docker build -t part-search-system:v1.0 .
+
+# 运行容器
+docker run -d \
+  --name part-search-system \
+  -p 5000:5000 \
+  -v $(pwd)/data:/app/data \
+  -e ADMIN_PASSWORD=admin2026 \
+  -e OLLAMA_URL=http://host.docker.internal:11434 \
+  --restart unless-stopped \
+  part-search-system:v1.0
+
+# 查看日志
+docker logs -f part-search-system
+
+# 停止并删除容器
+docker stop part-search-system && docker rm part-search-system</code></pre>
+
+  <h3>访问系统</h3>
+  <table>
+    <tr><th>页面</th><th>地址</th><th>说明</th></tr>
+    <tr><td>查询页面</td><td>http://localhost:5000</td><td>零件搜索、智能问答、仪表盘</td></tr>
+    <tr><td>管理后台</td><td>http://localhost:5000/admin</td><td>数据上传、模型管理（密码：admin2026）</td></tr>
+    <tr><td>版本信息</td><td>http://localhost:5000/api/version</td><td>系统版本API</td></tr>
+  </table>
+
+  <div class="note note-warning">
+    <strong>注意</strong>：生产环境请务必修改默认管理员密码（通过环境变量 <code>ADMIN_PASSWORD</code> 设置）。
+  </div>
+</section>
+
+<section id="config">
+  <h2>环境变量配置</h2>
+  <p>系统支持通过环境变量或 <code>docker-compose.yml</code> 中的 <code>environment</code> 段进行配置：</p>
+  <table>
+    <tr><th>变量名</th><th>默认值</th><th>说明</th></tr>
+    <tr><td><code>ADMIN_PASSWORD</code></td><td>admin2026</td><td>管理后台登录密码</td></tr>
+    <tr><td><code>OLLAMA_URL</code></td><td>http://host.docker.internal:11434</td><td>Ollama服务地址（容器内访问宿主机）</td></tr>
+    <tr><td><code>OLLAMA_MODEL</code></td><td>qwen2.5:7b</td><td>默认本地模型名称</td></tr>
+    <tr><td><code>FLASK_HOST</code></td><td>0.0.0.0</td><td>Flask监听地址</td></tr>
+    <tr><td><code>FLASK_PORT</code></td><td>5000</td><td>Flask监听端口</td></tr>
+    <tr><td><code>SECRET_KEY</code></td><td>parts-search-secret-key-2026</td><td>Flask会话密钥（生产环境请修改）</td></tr>
+    <tr><td><code>PARTS_DB_PATH</code></td><td>/app/data/parts.db</td><td>SQLite数据库文件路径</td></tr>
+    <tr><td><code>PARTS_UPLOAD_DIR</code></td><td>/app/data/uploads</td><td>上传文件临时目录</td></tr>
+  </table>
+
+  <h3>Ollama连接配置</h3>
+  <div class="card">
+    <div class="card-title">不同场景下的 OLLAMA_URL 设置</div>
+    <ul>
+      <li><strong>Ollama在宿主机上</strong>（Windows/Mac）：使用 <code>http://host.docker.internal:11434</code></li>
+      <li><strong>Ollama在宿主机上</strong>（Linux）：使用 <code>http://host.docker.internal:11434</code>，并在compose中取消注释 <code>extra_hosts</code></li>
+      <li><strong>Ollama在同一Docker网络中</strong>：使用 <code>http://ollama:11434</code>，并将Ollama容器加入同一网络</li>
+      <li><strong>Ollama在远程服务器上</strong>：使用 <code>http://远程IP:11434</code></li>
+      <li><strong>不使用本地模型</strong>：无需配置，系统自动回退到规则引擎或云端API</li>
+    </ul>
+  </div>
+</section>
+
+<section id="usage">
+  <h2>系统使用</h2>
+
+  <h3>1. 数据导入</h3>
+  <ol>
+    <li>访问管理后台 <code>http://localhost:5000/admin</code>，输入密码登录</li>
+    <li>在"上传与导入"标签页，拖拽或点击选择 .xlsx/.xlsm 文件</li>
+    <li>系统自动识别表头，非英文表头自动翻译为英文（如 Sachnummer → Part Number）</li>
+    <li>上传后自动清理全空字段列（保留 Part Number 关键列）</li>
+    <li>导入完成后在"数据库统计"标签页查看数据概览</li>
+  </ol>
+
+  <h3>2. 零件查询</h3>
+  <ul>
+    <li><strong>按零件号搜索</strong>：在查询页面输入完整或部分零件号</li>
+    <li><strong>按字段搜索</strong>：选择字段名，输入搜索值</li>
+    <li><strong>智能问答</strong>：在对话框中用自然语言提问，如"查找所有SOMA为Ja的零件"</li>
+    <li><strong>对比查询</strong>：如"对比零件A和零件B的差异"，系统自动高亮差异字段</li>
+    <li><strong>停止生成</strong>：AI回复过程中可点击"停止"按钮中断</li>
+  </ul>
+
+  <h3>3. 数据仪表盘</h3>
+  <ul>
+    <li>首页展示PN总数、含EC的PN数、EC总数、FAV/ZEUS数、SOMA数</li>
+    <li>点击图表元素可下钻查看详细记录，支持分页和CSV导出</li>
+    <li>EC阶段解决情况卡片用四色展示TO1/TO2/已解决/未解决EC数</li>
+  </ul>
+
+  <h3>4. 搜索历史</h3>
+  <ul>
+    <li>系统自动保存最近10条搜索记录</li>
+    <li>点击历史记录可快速重新搜索</li>
+  </ul>
+</section>
+
+<section id="ai">
+  <h2>AI模型管理</h2>
+  <span class="tag tag-ai">AI Compute</span>
+
+  <h3>算力模式切换</h3>
+  <p>在管理后台"AI模型管理"标签页顶部，可选择两种算力模式：</p>
+  <table>
+    <tr><th>模式</th><th>说明</th><th>适用场景</th></tr>
+    <tr><td>本地算力 (Ollama)</td><td>使用宿主机上运行的Ollama模型，数据不出局域网</td><td>数据安全要求高、有GPU的本地环境</td></tr>
+    <tr><td>线上算力 (Cloud API)</td><td>通过OpenAI兼容API调用云端大模型</td><td>无本地GPU、需要更强模型能力</td></tr>
+  </table>
+
+  <h3>本地模型管理</h3>
+  <ul>
+    <li><strong>查看已安装模型</strong>：卡片展示模型名称、大小、修改日期</li>
+    <li><strong>切换模型</strong>：点击"切换"按钮即可切换当前使用的模型</li>
+    <li><strong>下载模型</strong>：在"推荐模型"区域点击"下载"，实时显示下载进度</li>
+    <li><strong>删除模型</strong>：点击"删除"移除不需要的模型（当前使用中的模型不可删除）</li>
+  </ul>
+  <div class="note">推荐模型列表包括：qwen2.5:7b、qwen2.5:3b、qwen3:8b、llama3.1:8b、phi3:3.8b、gemma2:9b、mistral:7b、nomic-embed-text</div>
+
+  <h3>云端API配置</h3>
+  <ol>
+    <li>选择算力模式为"线上算力"</li>
+    <li>在云端配置表单中选择服务商（自动填充API地址和模型列表）</li>
+    <li>输入API Key（保存后显示掩码，如 sk-t****2345）</li>
+    <li>选择或输入模型名称</li>
+    <li>点击"测试连接"验证API连通性</li>
+    <li>点击"保存配置"，配置持久化存储，重启后自动加载</li>
+  </ol>
+  <table>
+    <tr><th>服务商</th><th>API地址</th><th>推荐模型</th></tr>
+    <tr><td>DeepSeek</td><td>https://api.deepseek.com/v1</td><td>deepseek-chat, deepseek-reasoner</td></tr>
+    <tr><td>通义千问</td><td>https://dashscope.aliyuncs.com/compatible-mode/v1</td><td>qwen-plus, qwen-turbo, qwen-max</td></tr>
+    <tr><td>Moonshot Kimi</td><td>https://api.moonshot.cn/v1</td><td>moonshot-v1-8k, moonshot-v1-32k</td></tr>
+    <tr><td>智谱GLM</td><td>https://open.bigmodel.cn/api/paas/v4</td><td>glm-4, glm-4-flash</td></tr>
+    <tr><td>OpenAI</td><td>https://api.openai.com/v1</td><td>gpt-4o, gpt-4o-mini</td></tr>
+    <tr><td>自定义</td><td>任意OpenAI兼容地址</td><td>自定义</td></tr>
+  </table>
+
+  <h3>智能体页面模型显示</h3>
+  <p>查询页面的智能体标签页顶部显示当前算力来源：</p>
+  <ul>
+    <li>本地模式：蓝色标签"本地算力"，下拉框列出已安装的Ollama模型</li>
+    <li>云端模式：蓝色标签"线上算力 ✓"，显示当前云端模型名称</li>
+    <li>未配置：橙色标签"线上算力 ⚠"提醒</li>
+  </ul>
+</section>
+
+<section id="monitoring">
+  <h2>系统监控</h2>
+  <p>系统提供实时监控页面，展示服务器运行状态，访问地址：<code>/monitoring</code>（从后台管理页"系统监控"按钮进入）。</p>
+
+  <h3>监控指标</h3>
+  <table>
+    <tr><th>指标</th><th>说明</th><th>数据来源</th></tr>
+    <tr><td>CPU使用率</td><td>系统整体CPU占用百分比</td><td>psutil</td></tr>
+    <tr><td>内存使用率</td><td>已用内存 / 总内存，含GB数值</td><td>psutil</td></tr>
+    <tr><td>GPU使用率</td><td>GPU核心占用百分比（需安装NVIDIA驱动）</td><td>nvidia-smi</td></tr>
+    <tr><td>GPU显存</td><td>已用显存 / 总显存（GB）</td><td>nvidia-smi</td></tr>
+    <tr><td>磁盘使用率</td><td>应用所在磁盘占用百分比</td><td>psutil</td></tr>
+    <tr><td>请求速率</td><td>每分钟API请求数</td><td>系统计数</td></tr>
+    <tr><td>活跃搜索</td><td>当前并发搜索用户数</td><td>并发控制模块</td></tr>
+  </table>
+
+  <h3>历史趋势图</h3>
+  <p>监控页面提供4个实时趋势图（每5秒刷新，保留近5分钟数据）：</p>
+  <ul>
+    <li><strong>CPU & GPU 使用率</strong>：双线对比图</li>
+    <li><strong>内存使用</strong>：内存占用百分比趋势</li>
+    <li><strong>请求速率</strong>：每分钟请求数变化</li>
+    <li><strong>活跃搜索</strong>：并发用户数变化</li>
+  </ul>
+</section>
+
+<section id="concurrency">
+  <h2>并发搜索控制</h2>
+  <p>系统支持并发搜索数量限制，防止服务器过载。默认上限为3人，可在后台管理中调整。</p>
+
+  <h3>工作机制</h3>
+  <ul>
+    <li>用户发起搜索时自动申请并发槽位</li>
+    <li>槽位已满时，页面顶部显示红色警告条</li>
+    <li>有用户释放槽位时，页面实时绿色提示"可以搜索了"</li>
+    <li>基于SSE（Server-Sent Events）实现实时推送</li>
+    <li>60秒无心跳自动释放超时会话</li>
+  </ul>
+
+  <h3>调整并发上限</h3>
+  <ol>
+    <li>登录后台管理页面</li>
+    <li>进入"系统监控"或"AI模型管理"页面</li>
+    <li>找到并发控制设置，修改最大并发数</li>
+    <li>系统会根据CPU核心数和内存大小自动推荐合理值</li>
+  </ol>
+
+  <h3>推荐并发数计算</h3>
+  <p>系统根据可用内存和CPU核心数自动推荐并发上限：</p>
+  <ul>
+    <li>每并发约需500MB内存</li>
+    <li>预留1个CPU核心给系统</li>
+    <li>推荐值范围：1 ~ 10人</li>
+  </ul>
+</section>
+
+<section id="troubleshooting">
+  <h2>故障排查</h2>
+
+  <div class="card">
+    <div class="card-title">容器无法启动</div>
+    <p>检查端口5000是否被占用：<code>docker-compose logs</code> 查看错误信息。修改 <code>docker-compose.yml</code> 中的端口映射，如 <code>"5001:5000"</code>。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Ollama连接失败</div>
+    <p>确认Ollama服务正在运行：<code>curl http://localhost:11434/api/tags</code>。在Docker容器中，确保 <code>OLLAMA_URL</code> 设置为 <code>http://host.docker.internal:11434</code>（Windows/Mac）或配置了 <code>extra_hosts</code>（Linux）。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">云端API测试失败</div>
+    <p>检查API Key是否正确、API地址是否完整（含 <code>/v1</code> 后缀）、模型名称是否拼写正确。部分服务商需要在控制台开通对应模型的API权限。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">数据库丢失</div>
+    <p>确认 <code>data/</code> 目录已正确挂载为Docker卷。使用 <code>docker-compose down</code> 不会删除卷数据，但 <code>docker-compose down -v</code> 会删除卷。重新部署时不要删除 <code>data/parts.db</code> 文件。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">上传文件失败</div>
+    <p>确认文件格式为 .xlsx 或 .xlsm。大文件上传可能需要调整Docker的超时设置。上传后系统会自动处理表头翻译和空列清理。</p>
+  </div>
+</section>
+
+<section id="version">
+  <h2>构建与部署版本</h2>
+
+  <h3>当前构建：build20260817 (2026-08-17)</h3>
+  <p>系统页面上不再显示版本号，仅在后台日志、API和配置文件中保留构建标识。版本号采用 <code>build + yyyymmdd</code> 格式命名。</p>
+
+  <table>
+    <tr><th>组件</th><th>位置</th><th>说明</th></tr>
+    <tr><td>版本号定义</td><td><code>config.py</code> → <code>APP_VERSION</code></td><td>修改此处更新构建标识</td></tr>
+    <tr><td>版本历史</td><td><code>config.py</code> → <code>VERSION_HISTORY</code></td><td>所有构建的功能更新记录</td></tr>
+    <tr><td>Python文件头</td><td><code>app.py</code>/<code>database.py</code>/<code>agent.py</code>/<code>config.py</code></td><td>标注构建号和更新内容</td></tr>
+    <tr><td>Docker镜像标签</td><td><code>Dockerfile</code> LABEL / <code>docker-compose.yml</code></td><td>构建时指定构建号标签</td></tr>
+    <tr><td>版本API</td><td><code>GET /api/version</code></td><td>返回构建号、名称、构建日期、完整历史</td></tr>
+  </table>
+
+  <h3>升级流程</h3>
+  <ol>
+    <li>修改 <code>config.py</code> 中的 <code>APP_VERSION</code>（格式：<code>build20260817</code>）</li>
+    <li>在 <code>VERSION_HISTORY</code> 列表顶部添加新构建记录</li>
+    <li>更新所有Python文件头部的构建号和更新说明</li>
+    <li>重新构建Docker镜像：<code>docker-compose up -d --build</code></li>
+  </ol>
+</section>
+
+</div>
+
+<div class="footer">
+  van.ea 车辆零件智能查询系统 | FBAC R&D | 2026-08-17<br>
+  本文档随系统源代码一同维护，采用 build+日期 命名规范
+</div>
+
+</body>
+</html>

@@ -1,0 +1,314 @@
+# ============================================
+# F-Brain 车辆零件智能查询系统 v2.0.0 (Phase 3) - Docker Compose
+# ============================================
+# 使用方法:
+#   单副本模式:  docker compose up -d --build
+#   多副本模式:  docker compose up -d --build --scale part-search=3
+#   Swarm 模式:  docker stack deploy -c docker-stack.yml van-ea (见 docker-stack.yml)
+#
+# 服务架构 (Phase 3):
+#   nginx:80
+#       ├─> part-search:5000 (多副本，Nginx least_conn 负载均衡)
+#       ├─> prometheus:9090 (监控抓取)
+#       └─> grafana:3000 (可视化)
+#               │
+#               ├─> redis:6379 (缓存 + Session + Leader Lock)
+#               └─> postgres:5432 (可选, DB_TYPE=postgresql 时使用)
+#                       │
+#               SQLite 默认: ./data/parts.db (与 postgres 二选一)
+#               Ollama: 外部或同网络, 见 OLLAMA_URL / OLLAMA_URLS
+# ============================================
+
+version: "3.8"
+
+x-part-search-common: &part-search-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file:
+    - .env
+  environment:
+    - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin2026}
+    - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
+    - OLLAMA_URLS=${OLLAMA_URLS:-}
+    - OLLAMA_LB_STRATEGY=${OLLAMA_LB_STRATEGY:-round_robin}
+    - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
+    - SECRET_KEY=${SECRET_KEY:-parts-search-secret-key-2026}
+    - FLASK_HOST=0.0.0.0
+    - FLASK_PORT=5000
+    - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+    - CACHE_ENABLED=${CACHE_ENABLED:-true}
+    - CACHE_TTL=${CACHE_TTL:-300}
+    - DELTA_REFRESH_INTERVAL=${DELTA_REFRESH_INTERVAL:-300}
+    - DB_TYPE=${DB_TYPE:-sqlite}
+    - POSTGRES_HOST=${POSTGRES_HOST:-postgres}
+    - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+    - POSTGRES_USER=${POSTGRES_USER:-van_ea}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-van_ea_2026}
+    - POSTGRES_DB=${POSTGRES_DB:-van_ea_parts}
+    - SESSION_TYPE=${SESSION_TYPE:-redis}
+    - SESSION_LIFETIME_SECONDS=${SESSION_LIFETIME_SECONDS:-86400}
+    - METRICS_ENABLED=${METRICS_ENABLED:-true}
+    - METRICS_ENDPOINT=/metrics
+    - LEADER_ELECTION_ENABLED=${LEADER_ELECTION_ENABLED:-true}
+    - INSTANCE_ID=van-ea-{{.Task.Slot}}
+  volumes:
+    - ./data:/app/data
+  depends_on:
+    redis:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 30s
+  restart: unless-stopped
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "5"
+  networks:
+    - part-search-net
+
+services:
+  # ---------- Web 应用 (Flask, 多副本) ----------
+  part-search:
+    <<: *part-search-common
+    container_name: part-search-system
+    # 如需直接访问 Flask (绕过 Nginx), 取消注释：
+    # ports:
+    #   - "5000:5000"
+    # Phase 3: 多副本部署 (docker compose up --scale part-search=3)
+    # 注: Docker Compose 的 replicas 仅在 deploy.mode=replicated 下生效
+    deploy:
+      mode: replicated
+      replicas: ${WEB_REPLICAS:-1}
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  # ---------- Redis (缓存 + Session + Leader Lock) ----------
+  redis:
+    image: redis:7-alpine
+    container_name: part-search-redis
+    volumes:
+      - ./data/redis:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --save 60 100
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --tcp-keepalive 60
+      --timeout 300
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    networks:
+      - part-search-net
+
+  # ---------- PostgreSQL (可选, DB_TYPE=postgresql 时使用) ----------
+  postgres:
+    image: postgres:16-alpine
+    container_name: part-search-postgres
+    # 如启用 PostgreSQL，取消注释 ports 以便外部管理工具连接
+    # ports:
+    #   - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-van_ea}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-van_ea_2026}
+      - POSTGRES_DB=${POSTGRES_DB:-van_ea_parts}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./scripts/deploy/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=768MB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-van_ea} -d ${POSTGRES_DB:-van_ea_parts}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+    profiles:
+      - postgres  # 默认不启动，执行: docker compose --profile postgres up -d
+    networks:
+      - part-search-net
+
+  # ---------- Nginx 反向代理 ----------
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: part-search-nginx
+    ports:
+      - "80:80"
+      # HTTPS: 生产环境建议启用
+      # - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend:/usr/share/nginx/static:ro
+    depends_on:
+      part-search:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+      grafana:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    networks:
+      - part-search-net
+
+  # ---------- Prometheus (Phase 3 监控) ----------
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    container_name: part-search-prometheus
+    # 如需直接访问 Prometheus UI, 取消注释:
+    # ports:
+    #   - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - ./data/prometheus:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    networks:
+      - part-search-net
+
+  # ---------- Grafana (Phase 3 可视化) ----------
+  grafana:
+    image: grafana/grafana-oss:11.2.0
+    container_name: part-search-grafana
+    # 如需直接访问 Grafana UI, 取消注释:
+    # ports:
+    #   - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin2026}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_USERS_ALLOW_ORG_CREATE=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost/grafana/}
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
+    volumes:
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./data/grafana:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    user: "472"
+    networks:
+      - part-search-net
+
+networks:
+  part-search-net:
+    driver: bridge
+    # Docker Swarm 下用 overlay
+    # driver: overlay
+    # attachable: true

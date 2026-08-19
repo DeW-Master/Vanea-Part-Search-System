@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>系统监控 - van.ea 车辆零件智能查询</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #0a0a0a;
+      --card-bg: #141414;
+      --border: #2a2a2a;
+      --border-bright: #3a3a3a;
+      --silver: #c0c0c0;
+      --silver-dark: #888;
+      --text-primary: #e0e0e0;
+      --text-secondary: #888;
+      --text-tertiary: #555;
+      --accent: #00d4ff;
+      --success: #00ff88;
+      --warning: #ffd700;
+      --danger: #ff6b6b;
+      --radius: 8px;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text-primary);
+      min-height: 100vh;
+    }
+    .header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+    }
+    .header-left { display: flex; align-items: center; gap: 14px; }
+    .logo-icon {
+      width: 40px; height: 40px; background: #fff;
+      border: 1px solid var(--border-bright); border-radius: var(--radius);
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden; padding: 2px;
+    }
+    .logo-icon img { width: 100%; height: 100%; object-fit: contain; }
+    .header-title { font-size: 17px; font-weight: 300; letter-spacing: 0.5px; color: var(--silver); }
+    .header-title .brand { font-weight: 700; font-size: 18px; }
+    .back-btn {
+      padding: 6px 14px; border: 1px solid var(--border-bright);
+      border-radius: var(--radius); color: var(--text-secondary);
+      text-decoration: none; font-size: 13px; transition: all 0.2s;
+    }
+    .back-btn:hover { color: var(--silver); border-color: var(--silver); }
+    .live-indicator {
+      display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--success);
+    }
+    .live-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--success);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    .section-title {
+      font-size: 13px; font-weight: 600; color: var(--silver);
+      letter-spacing: 1px; text-transform: uppercase;
+      margin-bottom: 16px; padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .metric-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .metric-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+    }
+    .metric-card.cpu::before { background: var(--accent); }
+    .metric-card.memory::before { background: var(--warning); }
+    .metric-card.gpu::before { background: #b388ff; }
+    .metric-card.disk::before { background: var(--success); }
+    .metric-card.requests::before { background: var(--danger); }
+    .metric-card.concurrent::before { background: #00e5ff; }
+    .metric-label {
+      font-size: 12px; color: var(--text-secondary);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+    .metric-value {
+      font-size: 32px; font-weight: 300; color: var(--text-primary);
+      font-family: 'SF Mono', monospace;
+    }
+    .metric-value .unit { font-size: 16px; color: var(--text-secondary); margin-left: 4px; }
+    .metric-sub {
+      font-size: 11px; color: var(--text-tertiary);
+      margin-top: 6px;
+    }
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 20px;
+      margin-bottom: 32px;
+    }
+    .chart-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .chart-title {
+      font-size: 13px; font-weight: 600; color: var(--silver);
+      margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+    }
+    .chart-title .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+    }
+    .chart-container {
+      position: relative;
+      height: 200px;
+    }
+    .system-info {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+    }
+    .info-item {
+      display: flex; justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .info-item:last-child { border-bottom: none; }
+    .info-label { color: var(--text-secondary); }
+    .info-value { color: var(--text-primary); font-family: monospace; }
+    .gpu-unavailable {
+      display: flex; align-items: center; justify-content: center;
+      height: 200px; color: var(--text-tertiary); font-size: 13px;
+      flex-direction: column; gap: 8px;
+    }
+    .gpu-unavailable svg { opacity: 0.3; }
+    @media (max-width: 768px) {
+      .charts-grid { grid-template-columns: 1fr; }
+      .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+      .metric-value { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-left">
+      <div class="logo-icon">
+        <img src="/logo.png" alt="FBAC R&D Logo">
+      </div>
+      <div class="header-title">
+        <span class="brand">van.ea</span> · 系统监控
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:16px;">
+      <div class="live-indicator">
+        <span class="live-dot"></span>
+        <span id="liveStatus">实时</span>
+      </div>
+      <a href="/" class="back-btn">← 返回首页</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- 实时指标卡片 -->
+    <div class="section-title">实时指标</div>
+    <div class="metrics-grid">
+      <div class="metric-card cpu">
+        <div class="metric-label">CPU 使用率</div>
+        <div class="metric-value" id="cpuValue">--<span class="unit">%</span></div>
+        <div class="metric-sub" id="cpuSub">检测中...</div>
+      </div>
+      <div class="metric-card memory">
+        <div class="metric-label">内存使用率</div>
+        <div class="metric-value" id="memValue">--<span class="unit">%</span></div>
+        <div class="metric-sub" id="memSub">检测中...</div>
+      </div>
+      <div class="metric-card gpu">
+        <div class="metric-label">GPU 使用率</div>
+        <div class="metric-value" id="gpuValue">--<span class="unit">%</span></div>
+        <div class="metric-sub" id="gpuSub">检测中...</div>
+      </div>
+      <div class="metric-card disk">
+        <div class="metric-label">磁盘使用率</div>
+        <div class="metric-value" id="diskValue">--<span class="unit">%</span></div>
+        <div class="metric-sub" id="diskSub">检测中...</div>
+      </div>
+      <div class="metric-card requests">
+        <div class="metric-label">请求速率</div>
+        <div class="metric-value" id="reqValue">--<span class="unit">/min</span></div>
+        <div class="metric-sub" id="reqSub">累计: --</div>
+      </div>
+      <div class="metric-card concurrent">
+        <div class="metric-label">活跃搜索</div>
+        <div class="metric-value" id="activeValue">--<span class="unit">人</span></div>
+        <div class="metric-sub" id="activeSub">上限: 3人</div>
+      </div>
+    </div>
+
+    <!-- 历史趋势图表 -->
+    <div class="section-title">历史趋势（近5分钟）</div>
+    <div class="charts-grid">
+      <div class="chart-card">
+        <div class="chart-title"><span class="dot" style="background:#00d4ff;"></span>CPU & GPU 使用率</div>
+        <div class="chart-container"><canvas id="cpuGpuChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title"><span class="dot" style="background:#ffd700;"></span>内存使用</div>
+        <div class="chart-container"><canvas id="memChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title"><span class="dot" style="background:#ff6b6b;"></span>请求速率</div>
+        <div class="chart-container"><canvas id="reqChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title"><span class="dot" style="background:#00e5ff;"></span>活跃搜索数</div>
+        <div class="chart-container"><canvas id="activeChart"></canvas></div>
+      </div>
+    </div>
+
+    <!-- 系统信息 -->
+    <div class="section-title">系统信息</div>
+    <div class="system-info">
+      <div class="info-grid" id="systemInfo">
+        <div class="info-item"><span class="info-label">运行时长</span><span class="info-value" id="sysUptime">--</span></div>
+        <div class="info-item"><span class="info-label">GPU可用</span><span class="info-value" id="sysGpu">--</span></div>
+        <div class="info-item"><span class="info-label">最后更新</span><span class="info-value" id="sysLastUpdate">--</span></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ============ 图表初始化 ============
+    Chart.defaults.color = '#888';
+    Chart.defaults.borderColor = '#2a2a2a';
+    Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, sans-serif';
+
+    var maxPoints = 60; // 5分钟 / 5秒 = 60个点
+    var labels = [];
+    var cpuData = [];
+    var gpuData = [];
+    var memData = [];
+    var reqData = [];
+    var activeData = [];
+
+    function createLineChart(ctx, datasets, yMax) {
+      return new Chart(ctx, {
+        type: 'line',
+        data: { labels: labels, datasets: datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { intersect: false, mode: 'index' },
+          plugins: {
+            legend: { display: datasets.length > 1, position: 'bottom', labels: { boxWidth: 12, padding: 12, font: { size: 11 } } },
+            tooltip: {
+              backgroundColor: '#1a1a1a',
+              borderColor: '#3a3a3a',
+              borderWidth: 1,
+              titleColor: '#c0c0c0',
+              bodyColor: '#e0e0e0',
+            }
+          },
+          scales: {
+            x: { display: true, ticks: { maxTicksLimit: 6, font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.03)' } },
+            y: {
+              display: true,
+              min: 0,
+              max: yMax || 100,
+              ticks: { font: { size: 10 }, callback: function(v) { return v + (yMax ? '' : '%'); } },
+              grid: { color: 'rgba(255,255,255,0.03)' }
+            }
+          },
+          elements: {
+            point: { radius: 0, hitRadius: 8 },
+            line: { tension: 0.3, borderWidth: 2 }
+          }
+        }
+      });
+    }
+
+    var cpuGpuChart = createLineChart(document.getElementById('cpuGpuChart'), [
+      { label: 'CPU', data: cpuData, borderColor: '#00d4ff', backgroundColor: 'rgba(0,212,255,0.1)', fill: true },
+      { label: 'GPU', data: gpuData, borderColor: '#b388ff', backgroundColor: 'rgba(179,136,255,0.1)', fill: true },
+    ]);
+
+    var memChart = createLineChart(document.getElementById('memChart'), [
+      { label: '内存', data: memData, borderColor: '#ffd700', backgroundColor: 'rgba(255,215,0,0.1)', fill: true },
+    ]);
+
+    var reqChart = createLineChart(document.getElementById('reqChart'), [
+      { label: '请求/分钟', data: reqData, borderColor: '#ff6b6b', backgroundColor: 'rgba(255,107,107,0.1)', fill: true },
+    ], undefined);
+
+    var activeChart = createLineChart(document.getElementById('activeChart'), [
+      { label: '活跃搜索', data: activeData, borderColor: '#00e5ff', backgroundColor: 'rgba(0,229,255,0.1)', fill: true },
+    ], 5);
+
+    // ============ 数据更新 ============
+    var startTime = Date.now();
+
+    function updateCharts(data) {
+      // 更新标签
+      labels.push(data.timestamp);
+      if (labels.length > maxPoints) labels.shift();
+
+      // CPU & GPU
+      cpuData.push(data.cpu_percent);
+      gpuData.push(data.gpu_available ? data.gpu_percent : null);
+      if (cpuData.length > maxPoints) { cpuData.shift(); gpuData.shift(); }
+
+      // 内存
+      memData.push(data.memory_percent);
+      if (memData.length > maxPoints) memData.shift();
+
+      // 请求
+      reqData.push(data.requests_per_minute);
+      if (reqData.length > maxPoints) reqData.shift();
+
+      // 活跃搜索
+      activeData.push(data.active_searches);
+      if (activeData.length > maxPoints) activeData.shift();
+
+      // 更新图表
+      cpuGpuChart.update('none');
+      memChart.update('none');
+      reqChart.update('none');
+      activeChart.update('none');
+    }
+
+    function updateMetrics(data) {
+      // CPU
+      document.getElementById('cpuValue').innerHTML = data.cpu_percent + '<span class="unit">%</span>';
+      document.getElementById('cpuSub').textContent = '系统负载';
+
+      // 内存
+      document.getElementById('memValue').innerHTML = data.memory_percent + '<span class="unit">%</span>';
+      document.getElementById('memSub').textContent = data.memory_used_gb + ' / ' + data.memory_total_gb + ' GB';
+
+      // GPU
+      if (data.gpu_available) {
+        document.getElementById('gpuValue').innerHTML = data.gpu_percent + '<span class="unit">%</span>';
+        document.getElementById('gpuSub').textContent = data.gpu_memory_used_gb + ' / ' + data.gpu_memory_total_gb + ' GB';
+      } else {
+        document.getElementById('gpuValue').innerHTML = '--<span class="unit">N/A</span>';
+        document.getElementById('gpuSub').textContent = '未检测到GPU';
+      }
+
+      // 磁盘
+      document.getElementById('diskValue').innerHTML = data.disk_percent + '<span class="unit">%</span>';
+      document.getElementById('diskSub').textContent = '应用磁盘';
+
+      // 请求
+      document.getElementById('reqValue').innerHTML = data.requests_per_minute + '<span class="unit">/min</span>';
+      document.getElementById('reqSub').textContent = '累计: ' + data.total_requests.toLocaleString();
+
+      // 活跃搜索
+      document.getElementById('activeValue').innerHTML = data.active_searches + '<span class="unit">人</span>';
+      document.getElementById('activeSub').textContent = '并发搜索中';
+
+      // 系统信息
+      var elapsed = Math.floor((Date.now() - startTime) / 1000);
+      var hours = Math.floor(elapsed / 3600);
+      var mins = Math.floor((elapsed % 3600) / 60);
+      var secs = elapsed % 60;
+      document.getElementById('sysUptime').textContent = hours + 'h ' + mins + 'm ' + secs + 's';
+      document.getElementById('sysGpu').textContent = data.gpu_available ? '是' : '否';
+      document.getElementById('sysLastUpdate').textContent = data.timestamp;
+    }
+
+    function fetchMetrics() {
+      fetch('/api/monitoring/current')
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res.success) {
+            updateMetrics(res.data);
+            updateCharts(res.data);
+          }
+        })
+        .catch(function() {});
+    }
+
+    // 加载历史数据
+    function loadHistory() {
+      fetch('/api/monitoring/history')
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res.success && res.data && res.data.length > 0) {
+            res.data.forEach(function(d) {
+              updateCharts(d);
+            });
+            updateMetrics(res.data[res.data.length - 1]);
+          }
+        })
+        .catch(function() {});
+    }
+
+    // 版本信息
+    fetch('/api/version')
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res.success) {
+          document.getElementById('sysVersion').textContent = res.version;
+        }
+      })
+      .catch(function() {});
+
+    // 启动
+    loadHistory();
+    setInterval(fetchMetrics, 5000);
+  </script>
+</body>
+</html>
