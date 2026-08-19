@@ -134,6 +134,90 @@
       gap: 12px;
     }
 
+    .presence-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: transparent;
+      border: 1px solid var(--border-bright);
+      padding: 6px 12px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      color: var(--silver-mid);
+      transition: all 0.2s;
+      cursor: default;
+    }
+    .presence-badge:hover { border-color: var(--silver); color: var(--silver); }
+    .presence-badge .presence-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6);
+      animation: presencePulse 2s infinite;
+    }
+    @keyframes presencePulse {
+      0% { box-shadow: 0 0 0 0 rgba(52,211,153,0.5); }
+      70% { box-shadow: 0 0 0 6px rgba(52,211,153,0); }
+      100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
+    }
+    .presence-badge #presenceCount { font-weight: 600; color: var(--text); min-width: 12px; text-align: center; }
+
+    .welcome-bubble {
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      border: 1px solid var(--gold);
+      border-radius: 16px;
+      padding: 20px 28px;
+      box-shadow: 0 8px 32px rgba(201,162,39,0.25), 0 0 0 1px rgba(201,162,39,0.1);
+      z-index: 2001;
+      max-width: 480px;
+      width: calc(100% - 48px);
+      opacity: 0;
+      transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+      pointer-events: auto;
+    }
+    .welcome-bubble.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    .welcome-bubble-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .welcome-bubble-icon {
+      width: 40px; height: 40px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--gold), #d4af37);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+    .welcome-bubble-title {
+      font-size: 16px; font-weight: 600; color: var(--gold);
+    }
+    .welcome-bubble-body {
+      font-size: 14px; color: var(--silver); line-height: 1.6;
+    }
+    .welcome-bubble-close {
+      position: absolute; top: 12px; right: 12px;
+      background: none; border: none; color: var(--silver-mid);
+      cursor: pointer; padding: 4px; border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .welcome-bubble-close:hover { color: var(--text); background: var(--card-bg-alt); }
+    .welcome-bubble-footer {
+      margin-top: 14px;
+      font-size: 12px;
+      color: var(--silver-mid);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
     .agent-badge {
       display: flex;
       align-items: center;
@@ -2493,6 +2577,11 @@
       </div>
     </div>
     <div class="header-right">
+      <div class="presence-badge" id="presenceBadge" title="活动用户">
+        <span class="presence-dot"></span>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span id="presenceCount">0</span>
+      </div>
       <div class="agent-badge" id="agentBadge">
         <span class="dot"></span>
         <span id="agentModeText">...</span>
@@ -2780,6 +2869,22 @@
     </div>
   </div>
 
+  <!-- ==================== Welcome Bubble (first visit) ==================== -->
+  <div class="welcome-bubble" id="welcomeBubble">
+    <button class="welcome-bubble-close" onclick="dismissWelcomeBubble()" title="关闭">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <div class="welcome-bubble-header">
+      <div class="welcome-bubble-icon">👋</div>
+      <div class="welcome-bubble-title" id="welcomeBubbleTitle">欢迎使用 van.ea</div>
+    </div>
+    <div class="welcome-bubble-body" id="welcomeBubbleBody">有新的用户正在使用！探索零件搜索、阶段对比和智能问答功能。</div>
+    <div class="welcome-bubble-footer">
+      <span style="color:var(--success);">●</span>
+      <span id="welcomeBubbleFooter">系统运行正常</span>
+    </div>
+  </div>
+
   <!-- ==================== Toast Container ==================== -->
   <div class="toast-container" id="toastContainer"></div>
 
@@ -2961,6 +3066,12 @@
         drillLoadFailed: '加载失败',
         drillNoResults: '没有符合条件的 PN',
         drillPnUnit: 'PN',
+        presenceUsers: '活动用户',
+        welcomeTitle: '欢迎使用 van.ea',
+        welcomeBody: '有新的用户正在使用！您可以探索零件搜索、阶段对比和智能问答功能。',
+        welcomeFooter: '系统运行正常',
+        newUserJoined: '有新用户加入',
+        activeUsersOnline: '位用户在线',
         deltaToggleLabel: 'Delta',
         delta1Btn: 'Delta1',
         delta2Btn: 'Delta2',
@@ -3170,6 +3281,12 @@
         drillLoadFailed: 'Load failed',
         drillNoResults: 'No matching PN found',
         drillPnUnit: 'PN',
+        presenceUsers: 'Active users',
+        welcomeTitle: 'Welcome to van.ea',
+        welcomeBody: 'A new user is online! Explore parts search, delta comparison, and AI assistant features.',
+        welcomeFooter: 'System running normally',
+        newUserJoined: 'New user joined',
+        activeUsersOnline: 'users online',
         deltaToggleLabel: 'Delta',
         delta1Btn: 'Delta1',
         delta2Btn: 'Delta2',
@@ -3379,6 +3496,12 @@
         drillLoadFailed: 'Laden fehlgeschlagen',
         drillNoResults: 'Keine passenden PN gefunden',
         drillPnUnit: 'PN',
+        presenceUsers: 'Aktive Benutzer',
+        welcomeTitle: 'Willkommen bei van.ea',
+        welcomeBody: 'Ein neuer Benutzer ist online! Entdecken Sie Teilesuche, Delta-Vergleich und KI-Assistent.',
+        welcomeFooter: 'System läuft normal',
+        newUserJoined: 'Neuer Benutzer beigetreten',
+        activeUsersOnline: 'Benutzer online',
         deltaToggleLabel: 'Delta',
         delta1Btn: 'Delta1',
         delta2Btn: 'Delta2',
@@ -6061,11 +6184,16 @@
   </script>
   <script src="delta.js"></script>
   <script>
-    // ============ 并发搜索控制 + SSE实时通知 ============
+    // ============ 并发搜索控制 + SSE实时通知 + 活动用户追踪 ============
     var _concurrentSessionId = localStorage.getItem('concurrent_session_id') || '';
     var _sseSource = null;
     var _heartbeatTimer = null;
     var _wasFull = false;
+
+    // ---- 活动用户追踪 ----
+    var _visitorId = localStorage.getItem('van_ea_visitor_id') || '';
+    var _presenceTimer = null;
+    var _welcomeDismissed = false;
 
     function updateConcurrencyBanner(count, max, available) {
       var banner = document.getElementById('concurrencyBanner');
@@ -6073,7 +6201,6 @@
       if (!banner || !text) return;
 
       if (count >= max) {
-        // 并发已满 - 红色警告
         banner.style.display = 'block';
         banner.style.background = 'rgba(255,107,107,0.15)';
         banner.style.color = '#ff9999';
@@ -6081,22 +6208,80 @@
         text.innerHTML = '⚠️ 当前并发搜索已满（' + count + '/' + max + '），请稍候再试。系统将在有空闲时自动提醒。';
         _wasFull = true;
       } else if (_wasFull && available > 0) {
-        // 刚释放出槽位 - 绿色提示
         banner.style.display = 'block';
         banner.style.background = 'rgba(0,255,136,0.1)';
         banner.style.color = '#66ffaa';
         banner.style.borderBottomColor = 'rgba(0,255,136,0.3)';
         text.innerHTML = '✅ 有空闲槽位了（' + count + '/' + max + '），现在可以搜索了！';
         _wasFull = false;
-        // 5秒后自动隐藏
         setTimeout(function() {
           if (!_wasFull) banner.style.display = 'none';
         }, 5000);
       } else {
-        // 正常状态 - 隐藏
         banner.style.display = 'none';
         _wasFull = false;
       }
+    }
+
+    function updatePresenceBadge(count) {
+      var el = document.getElementById('presenceCount');
+      var badge = document.getElementById('presenceBadge');
+      if (el) el.textContent = count;
+      if (badge) badge.title = count + ' ' + t('activeUsersOnline');
+    }
+
+    function showWelcomeBubble(isFirstVisit) {
+      if (_welcomeDismissed) return;
+      var bubble = document.getElementById('welcomeBubble');
+      if (!bubble) return;
+      var titleEl = document.getElementById('welcomeBubbleTitle');
+      var bodyEl = document.getElementById('welcomeBubbleBody');
+      var footerEl = document.getElementById('welcomeBubbleFooter');
+      if (titleEl) titleEl.textContent = t('welcomeTitle');
+      if (bodyEl) bodyEl.textContent = t('welcomeBody');
+      if (footerEl) footerEl.textContent = t('welcomeFooter');
+      // 延迟弹出，等页面加载完成
+      setTimeout(function() { bubble.classList.add('show'); }, 600);
+      // 12秒后自动关闭
+      setTimeout(function() { dismissWelcomeBubble(); }, 12000);
+    }
+
+    function dismissWelcomeBubble() {
+      _welcomeDismissed = true;
+      var bubble = document.getElementById('welcomeBubble');
+      if (bubble) bubble.classList.remove('show');
+      try { localStorage.setItem('van_ea_welcome_shown', '1'); } catch(e) {}
+    }
+
+    function sendPresencePing() {
+      fetch('/api/presence/ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visitor_id: _visitorId || undefined, page: 'home' })
+      })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data && data.success) {
+            if (data.visitor_id && !_visitorId) {
+              _visitorId = data.visitor_id;
+              try { localStorage.setItem('van_ea_visitor_id', _visitorId); } catch(e) {}
+            }
+            updatePresenceBadge(data.active_count || 1);
+            // 首次访问（服务端判定为新用户）且本地未显示过欢迎气泡
+            if (data.is_new_user) {
+              var shownBefore = false;
+              try { shownBefore = localStorage.getItem('van_ea_welcome_shown') === '1'; } catch(e) {}
+              if (!shownBefore) showWelcomeBubble(true);
+            }
+          }
+        })
+        .catch(function() {});
+    }
+
+    function initPresence() {
+      sendPresencePing();
+      // 每30秒发送一次心跳
+      _presenceTimer = setInterval(sendPresencePing, 30000);
     }
 
     function initConcurrencySSE() {
@@ -6106,11 +6291,28 @@
         _sseSource.onmessage = function(e) {
           try {
             var data = JSON.parse(e.data);
-            updateConcurrencyBanner(data.count, data.max, data.available);
+            // 并发搜索状态
+            if (data.type === 'concurrency' || data.type === 'heartbeat') {
+              if (data.count !== undefined) {
+                updateConcurrencyBanner(data.count, data.max, data.available);
+              }
+            }
+            // 活动用户状态
+            if (data.type === 'visitors') {
+              updatePresenceBadge(data.active_count || 0);
+            }
+            // 新用户加入通知（非自身）
+            if (data.type === 'visitors' && data.event === 'user_joined') {
+              var shownBefore = false;
+              try { shownBefore = localStorage.getItem('van_ea_welcome_shown') === '1'; } catch(e) {}
+              // 如果其他新用户加入且当前用户不是新用户，显示toast
+              if (!data.is_new_for_self && data.new_visitor_id) {
+                showToast(t('newUserJoined'), 'info', 4000);
+              }
+            }
           } catch(err) {}
         };
         _sseSource.onerror = function() {
-          // 连接断开后5秒重连
           setTimeout(initConcurrencySSE, 5000);
         };
       } catch(e) {}
@@ -6119,6 +6321,7 @@
     // 初始化
     document.addEventListener('DOMContentLoaded', function() {
       initConcurrencySSE();
+      initPresence();
     });
   </script>
 </body>

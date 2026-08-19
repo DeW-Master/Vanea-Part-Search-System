@@ -58,9 +58,21 @@ def _init_phase3_modules():
         from flask_session import Session
 
         if SESSION_TYPE == 'redis' and _redis_client is not None:
+            # flask-session 0.8.x 使用 msgpack 写入二进制 session 数据，
+            # 必须使用 decode_responses=False 的独立 Redis 连接，
+            # 不能复用缓存层的 decode_responses=True 客户端，否则会触发
+            # UnicodeDecodeError 导致所有需认证的 API 返回 500。
+            import redis as _redis_lib
+            _session_redis = _redis_lib.Redis.from_url(
+                REDIS_URL,
+                decode_responses=False,
+                socket_connect_timeout=3,
+                socket_timeout=3,
+                retry_on_timeout=False,
+            )
             app.config.update(
                 SESSION_TYPE='redis',
-                SESSION_REDIS=_redis_client,
+                SESSION_REDIS=_session_redis,
                 SESSION_PERMANENT=SESSION_PERMANENT,
                 PERMANENT_SESSION_LIFETIME=timedelta(seconds=SESSION_LIFETIME_SECONDS),
                 SESSION_USE_SIGNER=SESSION_USE_SIGNER,
@@ -321,6 +333,80 @@ def notify_concurrency_change():
     for c in dead_clients:
         if c in _sse_clients:
             _sse_clients.remove(c)
+
+# ============ 活动用户追踪（页面访问心跳） ============
+_visitors_lock = threading.RLock()
+_active_visitors = {}  # visitor_id -> {first_seen, last_seen, page, is_new}
+VISITOR_TIMEOUT = 90   # 90秒无心跳视为离线
+_known_visitors_key = 'fbrain_known_visitors'  # Redis set，记录历史访问者
+
+
+def _get_known_visitors():
+    """获取已知访问者ID集合（跨重启持久化到Redis）"""
+    if _redis_client is None:
+        return set()
+    try:
+        members = _redis_client.smembers(_known_visitors_key)
+        # decode_responses=True 时返回 str，否则 bytes
+        return {m.decode() if isinstance(m, bytes) else m for m in members}
+    except Exception:
+        return set()
+
+
+def _mark_visitor_known(visitor_id):
+    """将访问者标记为已知用户"""
+    if _redis_client is None:
+        return
+    try:
+        _redis_client.sadd(_known_visitors_key, visitor_id)
+    except Exception:
+        pass
+
+
+def get_active_visitors():
+    """获取当前活动访问者列表（自动清理超时）"""
+    with _visitors_lock:
+        now = time.time()
+        expired = [vid for vid, info in _active_visitors.items()
+                   if now - info['last_seen'] > VISITOR_TIMEOUT]
+        for vid in expired:
+            del _active_visitors[vid]
+        return list(_active_visitors.items())
+
+
+def notify_visitor_change(extra_event=None):
+    """向所有SSE客户端推送活动用户状态变化"""
+    visitors = get_active_visitors()
+    active_count = len(visitors)
+    new_count = sum(1 for _, info in visitors if info.get('is_new'))
+    payload = {
+        'type': 'visitors',
+        'active_count': active_count,
+        'new_count': new_count,
+        'visitors': [
+            {
+                'id': vid[:8],
+                'page': info.get('page', ''),
+                'first_seen': info.get('first_seen'),
+                'last_seen': info.get('last_seen'),
+                'is_new': info.get('is_new', False),
+            } for vid, info in visitors
+        ],
+    }
+    if extra_event:
+        payload.update(extra_event)
+    message = f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    dead_clients = []
+    for client in _sse_clients:
+        try:
+            client['queue'].append(message)
+            client['event'].set()
+        except Exception:
+            dead_clients.append(client)
+    for c in dead_clients:
+        if c in _sse_clients:
+            _sse_clients.remove(c)
+
 
 # ============ 系统监控 ============
 _monitoring_lock = threading.Lock()
@@ -1651,6 +1737,78 @@ def concurrent_heartbeat():
             _active_sessions[session_id]['last_heartbeat'] = time.time()
             return jsonify({'success': True, 'count': len(_active_sessions)})
     return jsonify({'success': False, 'error': 'session not found'}), 404
+
+
+# ============ 活动用户追踪 API ============
+@app.route('/api/presence/ping', methods=['POST'])
+def presence_ping():
+    """前端页面心跳：报告访客在线状态。
+
+    请求体: {visitor_id?, page?}
+    响应: {success, visitor_id, is_new_user, active_count}
+    """
+    data = request.get_json(silent=True) or {}
+    visitor_id = data.get('visitor_id') or str(uuid.uuid4())
+    page = data.get('page', 'home')
+    now = time.time()
+
+    known = _get_known_visitors()
+    is_new_user = visitor_id not in known
+
+    with _visitors_lock:
+        # 先清理过期访客，避免返回包含僵尸条目的计数
+        expired = [vid for vid, info in _active_visitors.items()
+                   if now - info['last_seen'] > VISITOR_TIMEOUT]
+        for vid in expired:
+            del _active_visitors[vid]
+
+        if visitor_id not in _active_visitors:
+            _active_visitors[visitor_id] = {
+                'first_seen': now,
+                'last_seen': now,
+                'page': page,
+                'is_new': is_new_user,
+            }
+            # 新访客加入时通知所有在线用户
+            _mark_visitor_known(visitor_id)
+            should_notify = True
+            extra = {'event': 'user_joined', 'new_visitor_id': visitor_id[:8]}
+        else:
+            _active_visitors[visitor_id]['last_seen'] = now
+            _active_visitors[visitor_id]['page'] = page
+            should_notify = False
+            extra = None
+        active_count = len(_active_visitors)
+
+    if should_notify:
+        notify_visitor_change(extra)
+
+    return jsonify({
+        'success': True,
+        'visitor_id': visitor_id,
+        'is_new_user': is_new_user,
+        'active_count': active_count,
+    })
+
+
+@app.route('/api/presence/status')
+def presence_status():
+    """获取当前活动用户状态（供管理后台轮询）"""
+    visitors = get_active_visitors()
+    return jsonify({
+        'success': True,
+        'active_count': len(visitors),
+        'new_count': sum(1 for _, info in visitors if info.get('is_new')),
+        'visitors': [
+            {
+                'id': vid[:8],
+                'page': info.get('page', ''),
+                'first_seen': info.get('first_seen'),
+                'last_seen': info.get('last_seen'),
+                'is_new': info.get('is_new', False),
+            } for vid, info in visitors
+        ],
+    })
 
 
 @app.route('/api/concurrent/stream')

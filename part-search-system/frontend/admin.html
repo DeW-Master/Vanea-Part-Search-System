@@ -787,6 +787,61 @@
         .stat-card.purple .stat-icon svg { color: var(--purple); }
         .stat-card.purple .stat-value { color: var(--purple); }
 
+        /* ===== Real-time Monitor ===== */
+        .monitor-status-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 10px 16px;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+        .monitor-live-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 0 0 rgba(91, 157, 110, 0.6);
+            animation: monitorPulse 2s infinite;
+        }
+        @keyframes monitorPulse {
+            0% { box-shadow: 0 0 0 0 rgba(91, 157, 110, 0.6); }
+            70% { box-shadow: 0 0 0 8px rgba(91, 157, 110, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(91, 157, 110, 0); }
+        }
+        .monitor-last-update {
+            margin-left: auto;
+            font-size: 12px;
+            color: var(--text-light);
+        }
+        .visitor-status-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .visitor-status-tag.online {
+            background: var(--success-light);
+            color: var(--success);
+        }
+        .visitor-status-tag.new {
+            background: var(--warning-light);
+            color: var(--warning);
+        }
+        .visitor-status-tag .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
         /* ===== Toast ===== */
         .toast {
             position: fixed;
@@ -1043,6 +1098,10 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                 <span id="tabModelsText">AI模型管理</span>
             </button>
+            <button class="section-tab" id="tab-monitor" onclick="switchSection('monitor')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                <span id="tabMonitorText">实时监控</span>
+            </button>
         </div>
 
         <div class="main-container">
@@ -1296,6 +1355,57 @@
                     <div id="recommendedModelsList" class="models-grid"></div>
                 </div>
             </div>
+
+            <!-- ===== Real-time Monitor Section ===== -->
+            <div class="panel" id="panel-monitor">
+                <div class="section-header">
+                    <h2 id="monitorSectionTitle">实时活动监控</h2>
+                    <p id="monitorSectionDesc">追踪当前系统在线用户数量、新用户访问及活动状态。</p>
+                </div>
+                <div class="section-body">
+                    <div class="monitor-status-bar">
+                        <span class="monitor-live-dot"></span>
+                        <span id="monitorLiveText">实时更新中</span>
+                        <span class="monitor-last-update" id="monitorLastUpdate"></span>
+                    </div>
+                    <div class="stats-grid" id="monitorStatsGrid">
+                        <div class="stat-card green">
+                            <div class="stat-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            </div>
+                            <div class="stat-label" id="monitorActiveLabel">当前活动用户</div>
+                            <div class="stat-value" id="monitorActiveCount">0</div>
+                        </div>
+                        <div class="stat-card orange">
+                            <div class="stat-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                            </div>
+                            <div class="stat-label" id="monitorNewLabel">新用户</div>
+                            <div class="stat-value" id="monitorNewCount">0</div>
+                        </div>
+                    </div>
+
+                    <div class="file-stats-section" style="margin-top:32px;">
+                        <h3 class="charts-title" id="monitorListTitle">活动用户列表</h3>
+                        <div class="file-stats-table-wrap">
+                            <table class="admin-table file-stats-table" id="monitorVisitorTable">
+                                <thead>
+                                    <tr>
+                                        <th id="monitorColId">用户ID</th>
+                                        <th id="monitorColPage">当前页面</th>
+                                        <th id="monitorColFirstSeen">首次访问</th>
+                                        <th id="monitorColLastSeen">最后心跳</th>
+                                        <th id="monitorColStatus">状态</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="monitorVisitorTableBody">
+                                    <tr><td colspan="5" style="text-align:center;color:var(--text-secondary);padding:24px;" id="monitorEmptyText">加载中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1468,7 +1578,23 @@
                 filesLoadError: '文件列表加载失败',
                 columnsLoadError: '列列表加载失败',
                 refreshBtn: '刷新',
-                pnIcon: 'PN'
+                pnIcon: 'PN',
+                tabMonitor: '实时监控',
+                monitorSectionTitle: '实时活动监控',
+                monitorSectionDesc: '追踪当前系统在线用户数量、新用户访问及活动状态。',
+                monitorLiveText: '实时更新中',
+                monitorActiveLabel: '当前活动用户',
+                monitorNewLabel: '新用户',
+                monitorListTitle: '活动用户列表',
+                monitorColId: '用户ID',
+                monitorColPage: '当前页面',
+                monitorColFirstSeen: '首次访问',
+                monitorColLastSeen: '最后心跳',
+                monitorColStatus: '状态',
+                monitorStatusOnline: '在线',
+                monitorStatusNew: '新用户',
+                monitorEmpty: '暂无活动用户',
+                monitorLoadError: '监控数据加载失败'
             },
             en: {
                 headerTitle: 'Data Admin Console',
@@ -1595,7 +1721,23 @@
                 filesLoadError: 'Failed to load files',
                 columnsLoadError: 'Failed to load columns',
                 refreshBtn: 'Refresh',
-                pnIcon: 'PN'
+                pnIcon: 'PN',
+                tabMonitor: 'Live Monitor',
+                monitorSectionTitle: 'Real-time Activity Monitor',
+                monitorSectionDesc: 'Track current online users, new visitor arrivals and activity status.',
+                monitorLiveText: 'Live',
+                monitorActiveLabel: 'Active Users',
+                monitorNewLabel: 'New Users',
+                monitorListTitle: 'Active Visitor List',
+                monitorColId: 'Visitor ID',
+                monitorColPage: 'Current Page',
+                monitorColFirstSeen: 'First Seen',
+                monitorColLastSeen: 'Last Heartbeat',
+                monitorColStatus: 'Status',
+                monitorStatusOnline: 'Online',
+                monitorStatusNew: 'New',
+                monitorEmpty: 'No active users',
+                monitorLoadError: 'Failed to load monitor data'
             }
         };
 
@@ -1779,6 +1921,64 @@
             if (section === 'columns') loadColumns();
             if (section === 'stats') loadStats();
             if (section === 'models') { loadBackendStatus(); loadAdminModels(); }
+            if (section === 'monitor') { loadPresenceStatus(); startMonitorPolling(); }
+            else { stopMonitorPolling(); }
+        }
+
+        // ===== Real-time Presence Monitor =====
+        let _monitorTimer = null;
+
+        function _formatTime(ts) {
+            if (!ts) return '-';
+            const d = new Date(ts * 1000);
+            return d.toLocaleTimeString('zh-CN', { hour12: false });
+        }
+
+        async function loadPresenceStatus() {
+            try {
+                const res = await fetch('/api/presence/status');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                if (!data.success) throw new Error('API error');
+
+                document.getElementById('monitorActiveCount').textContent = data.active_count;
+                document.getElementById('monitorNewCount').textContent = data.new_count;
+
+                const tbody = document.getElementById('monitorVisitorTableBody');
+                const visitors = data.visitors || [];
+                if (visitors.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-secondary);padding:24px;">${t('monitorEmpty')}</td></tr>`;
+                } else {
+                    tbody.innerHTML = visitors.map(v => {
+                        const isNew = v.is_new;
+                        const statusClass = isNew ? 'new' : 'online';
+                        const statusText = isNew ? t('monitorStatusNew') : t('monitorStatusOnline');
+                        return `<tr>
+                            <td><code style="color:var(--info);">${v.id}</code></td>
+                            <td>${v.page || '-'}</td>
+                            <td>${_formatTime(v.first_seen)}</td>
+                            <td>${_formatTime(v.last_seen)}</td>
+                            <td><span class="visitor-status-tag ${statusClass}"><span class="dot"></span>${statusText}</span></td>
+                        </tr>`;
+                    }).join('');
+                }
+                document.getElementById('monitorLastUpdate').textContent =
+                    (currentLang === 'zh' ? '更新于 ' : 'Updated ') + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+            } catch (e) {
+                console.error('Presence status error:', e);
+                const tbody = document.getElementById('monitorVisitorTableBody');
+                if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--danger);padding:24px;">${t('monitorLoadError')}</td></tr>`;
+            }
+        }
+
+        function startMonitorPolling() {
+            stopMonitorPolling();
+            loadPresenceStatus();
+            _monitorTimer = setInterval(loadPresenceStatus, 5000);
+        }
+
+        function stopMonitorPolling() {
+            if (_monitorTimer) { clearInterval(_monitorTimer); _monitorTimer = null; }
         }
 
         // ===== File Upload & Analyze =====
