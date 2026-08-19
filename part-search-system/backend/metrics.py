@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 van.ea 车辆零件智能查询系统 - Prometheus Metrics 模块
-版本: v2.0.0 (Phase 3)
-更新日期: 2026-08-17
 
 功能:
     - 暴露 /metrics 端点供 Prometheus 抓取
@@ -13,7 +11,6 @@ van.ea 车辆零件智能查询系统 - Prometheus Metrics 模块
 
 import time
 import base64
-import functools
 from typing import Dict, Any, Optional
 
 from flask import request, Response, g
@@ -509,35 +506,6 @@ class MetricsManager:
         if '.' in path.split('/')[-1] and not path.startswith('/api'):
             return '/static/*'
         return path
-
-    # ============== 装饰器 ==============
-    def timed_db(self, op: str = 'query'):
-        """DB 操作计时装饰器"""
-        def decorator(fn):
-            @functools.wraps(fn)
-            def wrapper(*args, **kwargs):
-                t0 = time.perf_counter()
-                try:
-                    return fn(*args, **kwargs)
-                finally:
-                    self.observe_db_query(time.perf_counter() - t0, op)
-            return wrapper
-        return decorator
-
-    def timed_delta(self, stage: str = 'all'):
-        def decorator(fn):
-            @functools.wraps(fn)
-            def wrapper(*args, **kwargs):
-                t0 = time.perf_counter()
-                try:
-                    r = fn(*args, **kwargs)
-                    self.observe_delta_compute(time.perf_counter() - t0, stage)
-                    return r
-                except Exception as e:
-                    self.inc_delta_compute_error(type(e).__name__)
-                    raise
-            return wrapper
-        return decorator
 
 
 # 全局单例

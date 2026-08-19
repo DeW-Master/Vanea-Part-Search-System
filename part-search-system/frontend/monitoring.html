@@ -419,16 +419,6 @@
         .catch(function() {});
     }
 
-    // 版本信息
-    fetch('/api/version')
-      .then(function(r) { return r.json(); })
-      .then(function(res) {
-        if (res.success) {
-          document.getElementById('sysVersion').textContent = res.version;
-        }
-      })
-      .catch(function() {});
-
     // 启动
     loadHistory();
     setInterval(fetchMetrics, 5000);

@@ -6,7 +6,6 @@ van.ea 车辆零件智能查询系统 - 配置文件
 """
 
 import os
-import json
 
 # ============ 基础路径 ============
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

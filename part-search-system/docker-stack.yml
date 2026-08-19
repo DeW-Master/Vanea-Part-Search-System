@@ -1,6 +1,5 @@
 # ============================================
 # van.ea 车辆零件智能查询系统 - Docker Swarm Stack
-# 版本: v2.0.0 (Phase 3)
 # ============================================
 # 用途: 多副本高可用生产部署 (Docker Swarm Mode)
 #
@@ -40,7 +39,7 @@ version: "3.8"
 services:
   # ---------- Web 应用 (Flask, 多副本 + 滚动更新) ----------
   part-search:
-    image: vanea/part-search:v2.0.0
+    image: vanea/part-search:latest
     # build: .  # stack deploy 不支持 build，需预先 push 到 registry
     environment:
       - ADMIN_PASSWORD_FILE=/run/secrets/van_ea_admin_password

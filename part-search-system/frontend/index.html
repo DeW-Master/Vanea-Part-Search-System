@@ -128,15 +128,6 @@
       color: var(--text-secondary);
       font-size: 14px;
     }
-    .version-badge {
-      display: inline-flex; align-items: center;
-      padding: 2px 10px; border-radius: var(--radius-sm);
-      font-size: 10px; font-weight: 600; letter-spacing: 0.5px;
-      background: transparent; color: var(--silver-dark);
-      border: 1px solid var(--border-bright);
-      white-space: nowrap;
-    }
-
     .header-right {
       display: flex;
       align-items: center;
@@ -1893,6 +1884,206 @@
     .drill-export-btn:hover { background: var(--success); color: #fff; }
     .drill-export-btn svg { width: 16px; height: 16px; }
 
+    /* ==================== Homepage PN Drilldown ==================== */
+
+    /* KPI card is clickable for drilldown */
+    .kpi-card.kpi-drillable {
+      cursor: pointer;
+    }
+    .kpi-card.kpi-drillable:hover {
+      border-color: var(--silver);
+      box-shadow: 0 0 12px rgba(192, 192, 192, 0.12);
+    }
+    .kpi-card .kpi-drill-hint {
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      font-size: 10px;
+      color: var(--text-light);
+      opacity: 0;
+      transition: opacity 0.2s;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+    }
+    .kpi-card.kpi-drillable:hover .kpi-drill-hint { opacity: 1; }
+
+    /* Drilldown PN list row (inside modal) */
+    .drill-pn-list { padding: 0; }
+    .drill-pn-item {
+      border-bottom: 1px solid var(--border);
+    }
+    .drill-pn-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 20px;
+      cursor: pointer;
+      transition: background 0.15s;
+      user-select: none;
+    }
+    .drill-pn-header:hover { background: var(--card-bg-alt); }
+    .drill-pn-caret {
+      width: 16px; height: 16px;
+      flex-shrink: 0;
+      color: var(--text-secondary);
+      transition: transform 0.2s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .drill-pn-item.expanded .drill-pn-caret { transform: rotate(90deg); color: var(--silver); }
+    .drill-pn-number {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--silver);
+      font-family: 'Consolas', 'Monaco', monospace;
+      min-width: 140px;
+    }
+    .drill-pn-type {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: var(--radius-sm);
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      font-weight: 600;
+    }
+    .drill-pn-type.zgs_upgraded { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+    .drill-pn-type.new_part     { background: rgba(91,157,110,0.15); color: var(--success); border: 1px solid rgba(91,157,110,0.3); }
+    .drill-pn-type.discontinued_part { background: rgba(199,84,80,0.15); color: var(--danger); border: 1px solid rgba(199,84,80,0.3); }
+    .drill-pn-summary {
+      font-size: 12px;
+      color: var(--text-secondary);
+      display: flex;
+      gap: 14px;
+      flex: 1;
+      flex-wrap: wrap;
+    }
+    .drill-pn-summary .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 1px 7px;
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      font-size: 11px;
+    }
+    .drill-pn-summary .tag.ec { color: #22d3ee; border-color: rgba(34,211,238,0.3); background: rgba(34,211,238,0.08); }
+    .drill-pn-summary .tag.zeus { color: #c084fc; border-color: rgba(192,132,252,0.3); background: rgba(192,132,252,0.08); }
+    .drill-pn-summary .tag.soma { color: var(--success); border-color: rgba(91,157,110,0.3); background: rgba(91,157,110,0.08); }
+
+    /* Enigma detail panel — two columns (from / to) */
+    .drill-enigma {
+      display: none;
+      padding: 14px 20px 18px;
+      background: var(--bg);
+      border-top: 1px solid var(--border);
+    }
+    .drill-pn-item.expanded .drill-enigma { display: flex; gap: 16px; flex-wrap: wrap; }
+    .drill-enigma-col {
+      flex: 1;
+      min-width: 320px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .drill-enigma-col-header {
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: var(--bg-alt);
+      color: var(--text-secondary);
+      border-bottom: 1px solid var(--border);
+    }
+    .drill-enigma-col-header.from { color: #f87171; }
+    .drill-enigma-col-header.to   { color: #34d399; }
+    .drill-enigma-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .drill-enigma-table th {
+      text-align: left;
+      padding: 6px 12px;
+      color: var(--text-light);
+      font-weight: 500;
+      width: 42%;
+      background: var(--bg-alt);
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    .drill-enigma-table td {
+      padding: 6px 12px;
+      color: var(--text);
+      border-bottom: 1px solid var(--border);
+      word-break: break-word;
+      white-space: normal;
+      font-family: 'Consolas', 'Monaco', monospace;
+    }
+    .drill-enigma-table tr:last-child th,
+    .drill-enigma-table tr:last-child td { border-bottom: none; }
+    .drill-enigma-table tr:hover td,
+    .drill-enigma-table tr:hover th { background: var(--card-bg-alt); }
+    .drill-enigma-empty {
+      padding: 24px;
+      text-align: center;
+      color: var(--text-light);
+      font-style: italic;
+      font-size: 12px;
+    }
+    .drill-enigma-col.changed-row td { background: rgba(201,162,39,0.06); }
+
+    /* Drilldown toolbar */
+    .drill-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-alt);
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .drill-toolbar .drill-toolbar-left {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    .drill-search {
+      background: var(--card-bg);
+      border: 1px solid var(--border-bright);
+      border-radius: var(--radius-sm);
+      padding: 6px 12px;
+      color: var(--text);
+      font-size: 13px;
+      width: 220px;
+      font-family: inherit;
+    }
+    .drill-search:focus { outline: none; border-color: var(--silver); }
+    .drill-filter-chip {
+      padding: 5px 12px;
+      font-size: 12px;
+      border: 1px solid var(--border-bright);
+      border-radius: var(--radius-sm);
+      background: var(--card-bg);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+    }
+    .drill-filter-chip:hover { color: var(--silver); border-color: var(--silver-dark); }
+    .drill-filter-chip.active {
+      background: rgba(192,192,192,0.12);
+      color: var(--silver);
+      border-color: var(--silver);
+    }
+    .drill-count-badge {
+      font-size: 12px;
+      color: var(--text-secondary);
+      padding: 3px 10px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+
     /* ==================== Search History ==================== */
     .search-history {
       margin-bottom: 20px;
@@ -2354,32 +2545,37 @@
       <div class="delta-dashboard">
         <!-- KPI Cards Row -->
         <div class="delta-kpi-row">
-          <div class="kpi-card" data-i18n-title="kpiNewPnTip" title="新阶段BOM中新增的零件号数量">
+          <div class="kpi-card kpi-drillable" data-drill-level="new_pn" data-i18n-title="kpiNewPnTip" title="新阶段BOM中新增的零件号数量" onclick="openHomeDrilldown('new_pn')">
             <div class="kpi-top-bar" style="background:#3b82f6;"></div>
+            <span class="kpi-drill-hint" data-i18n="drillHint">点击下钻</span>
             <div class="kpi-label" data-i18n="kpiNewPn">新增PN</div>
             <div class="kpi-value" id="kpiNewPn">—</div>
             <div class="kpi-sub" id="kpiNewPnSub" data-i18n="kpiNoData">无数据</div>
           </div>
-          <div class="kpi-card" data-i18n-title="kpiZgsTip" title="同PN下ZGS版本升级的数量">
+          <div class="kpi-card kpi-drillable" data-drill-level="zgs_upgraded" data-i18n-title="kpiZgsTip" title="同PN下ZGS版本升级的数量" onclick="openHomeDrilldown('zgs_upgraded')">
             <div class="kpi-top-bar" style="background:#3b82f6;"></div>
+            <span class="kpi-drill-hint" data-i18n="drillHint">点击下钻</span>
             <div class="kpi-label" data-i18n="kpiZgsChange">ZGS升级</div>
             <div class="kpi-value" id="kpiZgs">—</div>
             <div class="kpi-sub" id="kpiZgsSub" data-i18n="kpiNoData">无数据</div>
           </div>
-          <div class="kpi-card" data-i18n-title="kpiEcTip" title="EC号从无到有的新增数量">
+          <div class="kpi-card kpi-drillable" data-drill-level="has_ec" data-i18n-title="kpiEcTip" title="EC号从无到有的新增数量" onclick="openHomeDrilldown('has_ec')">
             <div class="kpi-top-bar" style="background:#06b6d4;"></div>
+            <span class="kpi-drill-hint" data-i18n="drillHint">点击下钻</span>
             <div class="kpi-label" data-i18n="kpiEc">EC新增</div>
             <div class="kpi-value" id="kpiEc">—</div>
             <div class="kpi-sub" id="kpiEcSub" data-i18n="kpiNoData">无数据</div>
           </div>
-          <div class="kpi-card" data-i18n-title="kpiKemTip" title="基于EC新增的KEM工程变更通知数量">
+          <div class="kpi-card kpi-drillable" data-drill-level="new_kem" data-i18n-title="kpiKemTip" title="基于EC新增的KEM工程变更通知数量" onclick="openHomeDrilldown('new_kem')">
             <div class="kpi-top-bar" style="background:#06b6d4;"></div>
+            <span class="kpi-drill-hint" data-i18n="drillHint">点击下钻</span>
             <div class="kpi-label" data-i18n="kpiKem">KEM释放</div>
             <div class="kpi-value" id="kpiKem">—</div>
             <div class="kpi-sub" id="kpiKemSub" data-i18n="kpiNoData">无数据</div>
           </div>
-          <div class="kpi-card" data-i18n-title="kpiSomaTip" title="SOMA状态从无到有的新增数量">
+          <div class="kpi-card kpi-drillable" data-drill-level="soma_ja" data-i18n-title="kpiSomaTip" title="SOMA状态从无到有的新增数量" onclick="openHomeDrilldown('soma_ja')">
             <div class="kpi-top-bar" style="background:#06b6d4;"></div>
+            <span class="kpi-drill-hint" data-i18n="drillHint">点击下钻</span>
             <div class="kpi-label" data-i18n="kpiSoma">SOMA新增</div>
             <div class="kpi-value" id="kpiSoma">—</div>
             <div class="kpi-sub" id="kpiSomaSub" data-i18n="kpiNoData">无数据</div>
@@ -2399,7 +2595,10 @@
         <div class="delta-main-grid">
           <!-- Left Panel: Tree Chart (SVG double funnel) -->
           <div class="delta-panel delta-tree-panel">
-            <div class="delta-panel-title" data-i18n="deltaPathViewTitle">EC / ZEUS / SOMA 路径分布</div>
+            <div class="delta-panel-title" style="display:flex;align-items:center;justify-content:space-between;">
+              <span data-i18n="deltaPathViewTitle">EC / ZEUS / SOMA 路径分布</span>
+              <button class="drill-filter-chip" onclick="openHomeDrilldown('all')" data-i18n="drillViewAllPn" title="查看当前Delta下所有PN及ENIGMA详情">查看全部 PN ▾</button>
+            </div>
             <div class="delta-tree-svg" id="deltaTreeSvg"></div>
           </div>
 
@@ -2422,34 +2621,6 @@
               <div class="delta-chart" id="deltaBarLineChart"></div>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Drill-down Modal -->
-    <div class="drill-overlay" id="drillOverlay" style="display:none;" onclick="if(event.target===this)closeDrilldown()">
-      <div class="drill-modal" id="drillModal">
-        <div class="drill-header">
-          <div class="drill-header-info">
-            <h3 id="drillTitle">--</h3>
-            <div class="drill-meta" id="drillMeta"></div>
-          </div>
-          <button class="drill-close" onclick="closeDrilldown()">
-            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-          </button>
-        </div>
-        <div class="drill-body" id="drillBody">
-          <div class="drill-loading">
-            <div class="spinner"></div>
-            <span data-i18n="loading">加载中...</span>
-          </div>
-        </div>
-        <div class="drill-footer" id="drillFooter" style="display:none;">
-          <button class="drill-export-btn" onclick="exportDrillData()">
-            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-            <span data-i18n="exportCsv">导出CSV</span>
-          </button>
-          <div class="drill-pagination" id="drillPagination"></div>
         </div>
       </div>
     </div>
@@ -2581,11 +2752,38 @@
     </div>
   </div>
 
+  <!-- ==================== Homepage PN Drilldown Modal ==================== -->
+  <div class="drill-overlay" id="homeDrillOverlay" style="display:none;" onclick="if(event.target===this)closeHomeDrilldown()">
+    <div class="drill-modal">
+      <div class="drill-header">
+        <div class="drill-header-info">
+          <h3 id="homeDrillTitle">PN 下钻详情</h3>
+          <div class="drill-meta" id="homeDrillMeta"></div>
+        </div>
+        <button class="drill-close" onclick="closeHomeDrilldown()" title="关闭 (Esc)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="drill-toolbar">
+        <div class="drill-toolbar-left">
+          <input type="text" class="drill-search" id="homeDrillSearch" placeholder="搜索 PN..." oninput="filterHomeDrilldown()">
+          <button class="drill-filter-chip active" data-drill-filter="all" onclick="setHomeDrillFilter('all')">全部</button>
+          <button class="drill-filter-chip" data-drill-filter="zgs_upgraded" onclick="setHomeDrillFilter('zgs_upgraded')">ZGS升级</button>
+          <button class="drill-filter-chip" data-drill-filter="new_part" onclick="setHomeDrillFilter('new_part')">新增PN</button>
+          <button class="drill-filter-chip" data-drill-filter="discontinued_part" onclick="setHomeDrillFilter('discontinued_part')">停产PN</button>
+          <span class="drill-count-badge" id="homeDrillCount">0 PN</span>
+        </div>
+      </div>
+      <div class="drill-body" id="homeDrillBody">
+        <div class="drill-loading"><div class="spinner"></div><span id="homeDrillLoadingText">加载中...</span></div>
+      </div>
+    </div>
+  </div>
+
   <!-- ==================== Toast Container ==================== -->
   <div class="toast-container" id="toastContainer"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script>
     // ==================== State ====================
     let currentLang = 'zh';
@@ -2594,8 +2792,6 @@
     let editContext = null;     // { recordId, field, displayName }
     let activeAutocompleteIndex = -1;
     let _statsData = null;      // Cached stats data for re-render on language switch
-    let _dashboardData = null;   // Cached dashboard data for re-render
-    let chartInstances = {};     // Chart.js instances for destroy/recreate
 
     // ==================== Translations ====================
     const i18n = {
@@ -2748,6 +2944,23 @@
         kpiSoma: 'SOMA新增',
         kpiSomaTip: 'SOMA状态从无到有的新增数量',
         kpiNoData: '无数据',
+        drillHint: '点击下钻',
+        drillViewAllPn: '查看全部 PN ▾',
+        drillAllPn: '全部 PN',
+        drillDiscontinued: '停产',
+        drillNewPart: '新增PN',
+        drillDiscontinuedPart: '停产PN',
+        drillFromStage: '起始阶段',
+        drillToStage: '目标阶段',
+        drillCategory: '类别',
+        drillFromRecord: '前期记录',
+        drillToRecord: '目标记录',
+        drillNoRecord: '该阶段无记录',
+        drillFields: '字段',
+        drillLoading: '正在加载 ENIGMA 数据...',
+        drillLoadFailed: '加载失败',
+        drillNoResults: '没有符合条件的 PN',
+        drillPnUnit: 'PN',
         deltaToggleLabel: 'Delta',
         delta1Btn: 'Delta1',
         delta2Btn: 'Delta2',
@@ -2940,6 +3153,23 @@
         kpiSoma: 'New SOMA',
         kpiSomaTip: 'SOMA status newly changed to ja',
         kpiNoData: 'No data',
+        drillHint: 'Click to drill down',
+        drillViewAllPn: 'View all PN ▾',
+        drillAllPn: 'All PN',
+        drillDiscontinued: 'Discontinued',
+        drillNewPart: 'New PN',
+        drillDiscontinuedPart: 'Discontinued PN',
+        drillFromStage: 'From',
+        drillToStage: 'To',
+        drillCategory: 'Category',
+        drillFromRecord: 'From record',
+        drillToRecord: 'To record',
+        drillNoRecord: 'No record in this stage',
+        drillFields: 'fields',
+        drillLoading: 'Loading ENIGMA data...',
+        drillLoadFailed: 'Load failed',
+        drillNoResults: 'No matching PN found',
+        drillPnUnit: 'PN',
         deltaToggleLabel: 'Delta',
         delta1Btn: 'Delta1',
         delta2Btn: 'Delta2',
@@ -3132,6 +3362,23 @@
         kpiSoma: 'Neue SOMA',
         kpiSomaTip: 'SOMA-Status neu auf ja geändert',
         kpiNoData: 'Keine Daten',
+        drillHint: 'Klick für Details',
+        drillViewAllPn: 'Alle PN anzeigen ▾',
+        drillAllPn: 'Alle PN',
+        drillDiscontinued: 'Eingestellt',
+        drillNewPart: 'Neue PN',
+        drillDiscontinuedPart: 'Eingestellte PN',
+        drillFromStage: 'Von',
+        drillToStage: 'Nach',
+        drillCategory: 'Kategorie',
+        drillFromRecord: 'Ausgangsdatensatz',
+        drillToRecord: 'Zieldatensatz',
+        drillNoRecord: 'Kein Datensatz in dieser Stufe',
+        drillFields: 'Felder',
+        drillLoading: 'ENIGMA-Daten werden geladen...',
+        drillLoadFailed: 'Laden fehlgeschlagen',
+        drillNoResults: 'Keine passenden PN gefunden',
+        drillPnUnit: 'PN',
         deltaToggleLabel: 'Delta',
         delta1Btn: 'Delta1',
         delta2Btn: 'Delta2',
@@ -3219,7 +3466,6 @@
       // Re-render dynamic content
       renderSuggestions();
       if (_statsData) renderStats(_statsData);
-      if (_dashboardData) renderDashboard(_dashboardData);
       // Re-render Delta Dashboard charts if initialized
       if (_deltaInited) {
         renderDeltaTreeSVG();
@@ -3268,14 +3514,6 @@
     function setLanguage(lang) {
       if (currentLang === lang) return;
       currentLang = lang;
-      applyTranslations();
-    }
-
-    function toggleLanguage() {
-      // Deprecated - kept for backward compatibility
-      const order = ['zh', 'en', 'de'];
-      const idx = order.indexOf(currentLang);
-      currentLang = order[(idx + 1) % order.length];
       applyTranslations();
     }
 
@@ -3397,10 +3635,6 @@
     // Helper: get KPI data for a delta
     function _getKpiData(deltaNum) {
       if (_deltaApiData) {
-        // Delta1 shows no data per PDF spec
-        if (deltaNum === 1) {
-          return { newPn: null, zgs: null, ec: null, kem: null, soma: null };
-        }
         var src = _deltaApiData['delta' + deltaNum].kpi;
         return {
           newPn: src.new_pn,
@@ -3434,11 +3668,6 @@
 
     // Helper: get EC pie data for a delta (with colors applied, filtered by drill-down level)
     function _getEcPieData(deltaNum) {
-      // Delta1 shows no data per PDF spec
-      if (deltaNum === 1) {
-        return [{ value: 1, name: t('pieNoData'), itemStyle: { color: '#374151' } }];
-      }
-
       var src;
       if (_deltaApiData) {
         src = _deltaApiData['delta' + deltaNum].ec_pie.map(function(item) {
@@ -3508,11 +3737,6 @@
 
     // Helper: get ZEUS pie data for a delta (with colors applied, filtered by drill-down level)
     function _getZeusPieData(deltaNum) {
-      // Delta1 shows no data per PDF spec
-      if (deltaNum === 1) {
-        return [{ value: 1, name: t('pieNoData'), itemStyle: { color: '#374151' } }];
-      }
-
       var src;
       if (_deltaApiData) {
         src = _deltaApiData['delta' + deltaNum].fav_pie.map(function(item) {
@@ -4100,42 +4324,23 @@
       _updateTreeNodeSelection();
     }
 
-    // Handle tree node double-click (navigate to Parts Search page)
+    // Handle tree node double-click (open homepage PN drilldown with enigma details)
     function _onTreeNodeDblClick(type, side) {
-      var stageKey = side === 1 ? 'TO1' : 'TO2';
-      var url = '';
-
+      var level = 'all';
       switch (type) {
-        case 'delta':
-          // Delta node: navigate to Delta page
-          if (side === 1) {
-            url = '/delta?from=pre-TO&to=TO1';
-          } else {
-            url = '/delta?from=TO1&to=TO2';
-          }
-          break;
-        case 'ec':
-          url = '/parts-search?stage=' + stageKey + '&has_ec=1';
-          break;
-        case 'noec':
-          url = '/parts-search?stage=' + stageKey + '&has_ec=0';
-          break;
-        case 'zeus':
-          url = '/parts-search?stage=' + stageKey + '&has_fav=1';
-          break;
-        case 'nozeus':
-          url = '/parts-search?stage=' + stageKey + '&has_fav=0';
-          break;
-        case 'soma':
-          url = '/parts-search?stage=' + stageKey + '&soma=ja';
-          break;
-        default:
-          return;
+        case 'delta':   level = 'all'; break;
+        case 'ec':      level = 'has_ec'; break;
+        case 'noec':    level = 'no_ec'; break;
+        case 'zeus':    level = 'zeus'; break;
+        case 'nozeus':  level = 'nozeus'; break;
+        case 'soma':    level = 'soma_ja'; break;
+        default:        level = 'all';
       }
-
-      if (url) {
-        window.open(url, '_blank');
+      // Ensure the correct delta side is active before drilling
+      if (side !== _deltaCurrent) {
+        switchDelta(side);
       }
+      openHomeDrilldown(level);
     }
 
     // Update tree node selection visual state
@@ -4535,6 +4740,267 @@
       });
     }
 
+    // ==================== Homepage PN Drilldown ====================
+    var _homeDrillState = {
+      deltas: [],
+      level: 'all',
+      filter: 'all',
+      search: '',
+      fromStage: 'pre-TO',
+      toStage: 'TO1'
+    };
+
+    // Map a KPI/tree level to a predicate on a delta item
+    function _homeDrillMatchesLevel(d, level) {
+      switch (level) {
+        case 'new_pn':
+          return d.match_type === 'new_part';
+        case 'zgs_upgraded':
+          return d.match_type === 'zgs_upgraded';
+        case 'discontinued_part':
+          return d.match_type === 'discontinued_part';
+        case 'has_ec':
+          // EC detection: presence of an EC value in the to-stage (ENIGMA)
+          return d.has_ec === true;
+        case 'new_kem':
+          // KEM release: has EC and a non-empty KEM Number in the to-record
+          var kemVal = _drillGetField(d, 'to_record', 'KEM Number');
+          return d.has_ec === true && !!kemVal;
+        case 'soma_ja':
+          var somaVal = (_drillGetField(d, 'to_record', 'SOMA in ZEUS') || '').toLowerCase();
+          return somaVal === 'ja' || somaVal === 'yes' || somaVal === 'true' || somaVal === '1';
+        case 'no_ec':
+          return d.has_ec === false;
+        case 'zeus':
+          return d.zeus_updated === true;
+        case 'nozeus':
+          return d.has_ec === true && d.zeus_updated !== true;
+        case 'all':
+        default:
+          return true;
+      }
+    }
+
+    function _drillGetField(d, recordKey, fieldName) {
+      var rec = d && d.enigma && d.enigma[recordKey];
+      if (!rec) return '';
+      var v = rec[fieldName];
+      return (v === null || v === undefined) ? '' : String(v);
+    }
+
+    function _drillLabelForLevel(level) {
+      var map = {
+        new_pn: t('kpiNewPn'),
+        zgs_upgraded: t('kpiZgsChange'),
+        has_ec: t('kpiEc'),
+        new_kem: t('kpiKem'),
+        soma_ja: t('kpiSoma'),
+        new_part: t('kpiNewPn'),
+        discontinued_part: t('drillDiscontinued'),
+        no_ec: t('treeNoEc'),
+        zeus: t('treeHasZeus'),
+        nozeus: t('treeNoZeus'),
+        all: t('drillAllPn')
+      };
+      return map[level] || level;
+    }
+
+    function _drillTypeLabel(matchType) {
+      var map = {
+        zgs_upgraded: t('kpiZgsChange'),
+        new_part: t('drillNewPart'),
+        discontinued_part: t('drillDiscontinuedPart')
+      };
+      return map[matchType] || matchType;
+    }
+
+    function openHomeDrilldown(level) {
+      if (!level) level = 'all';
+      // Determine stage pair based on the currently active delta
+      var deltaNum = (typeof _deltaCurrent !== 'undefined') ? _deltaCurrent : 2;
+      var fromStage, toStage;
+      if (deltaNum === 1) { fromStage = 'pre-TO'; toStage = 'TO1'; }
+      else { fromStage = 'TO1'; toStage = 'TO2'; }
+
+      _homeDrillState.level = level;
+      _homeDrillState.filter = 'all';
+      _homeDrillState.search = '';
+      _homeDrillState.fromStage = fromStage;
+      _homeDrillState.toStage = toStage;
+      _homeDrillState.deltas = [];
+
+      // Reset UI
+      var overlay = document.getElementById('homeDrillOverlay');
+      var searchInput = document.getElementById('homeDrillSearch');
+      if (searchInput) searchInput.value = '';
+      document.querySelectorAll('#homeDrillOverlay [data-drill-filter]').forEach(function(b) {
+        b.classList.toggle('active', b.getAttribute('data-drill-filter') === 'all');
+      });
+
+      var deltaLabel = (deltaNum === 1) ? 'Delta1 (pre-TO → TO1)' : 'Delta2 (TO1 → TO2)';
+      document.getElementById('homeDrillTitle').textContent =
+        _drillLabelForLevel(level) + ' · ' + deltaLabel;
+      document.getElementById('homeDrillMeta').innerHTML =
+        '<span>' + t('drillFromStage') + ': <strong>' + fromStage + '</strong></span>' +
+        '<span>' + t('drillToStage') + ': <strong>' + toStage + '</strong></span>' +
+        '<span>' + t('drillCategory') + ': <strong>' + _drillLabelForLevel(level) + '</strong></span>';
+
+      document.getElementById('homeDrillBody').innerHTML =
+        '<div class="drill-loading"><div class="spinner"></div><span>' + t('drillLoading') + '</span></div>';
+      overlay.style.display = 'flex';
+
+      // Fetch a large page of deltas (enigma records are included)
+      var url = '/api/delta?from=' + encodeURIComponent(fromStage) +
+                '&to=' + encodeURIComponent(toStage) +
+                '&page=1&page_size=1000';
+      fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(json) {
+          if (json && json.success && json.data && json.data.success !== false) {
+            var allDeltas = (json.data && json.data.deltas) || [];
+            _homeDrillState.deltas = allDeltas.filter(function(d) {
+              return _homeDrillMatchesLevel(d, level);
+            });
+            renderHomeDrilldown();
+          } else {
+            var errMsg = (json && (json.error || (json.data && json.data.error))) || t('drillLoadFailed');
+            document.getElementById('homeDrillBody').innerHTML =
+              '<div class="drill-loading">' + errMsg + '</div>';
+          }
+        })
+        .catch(function(err) {
+          document.getElementById('homeDrillBody').innerHTML =
+            '<div class="drill-loading">' + t('drillLoadFailed') + ': ' + err.message + '</div>';
+        });
+    }
+
+    function closeHomeDrilldown() {
+      var overlay = document.getElementById('homeDrillOverlay');
+      if (overlay) overlay.style.display = 'none';
+    }
+
+    function setHomeDrillFilter(filter) {
+      _homeDrillState.filter = filter;
+      document.querySelectorAll('#homeDrillOverlay [data-drill-filter]').forEach(function(b) {
+        b.classList.toggle('active', b.getAttribute('data-drill-filter') === filter);
+      });
+      renderHomeDrilldown();
+    }
+
+    function filterHomeDrilldown() {
+      var input = document.getElementById('homeDrillSearch');
+      _homeDrillState.search = (input.value || '').trim().toLowerCase();
+      renderHomeDrilldown();
+    }
+
+    function _homeDrillEscape(s) {
+      if (s === null || s === undefined) return '';
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function _homeDrillFormatVal(v) {
+      if (v === null || v === undefined || v === '') return '<span class="empty-val">—</span>';
+      return _homeDrillEscape(v);
+    }
+
+    // Render the full enigma record (all fields) as a two-column table
+    function _renderEnigmaRecord(record, stageLabel, cssClass) {
+      if (!record || typeof record !== 'object') {
+        return '<div class="drill-enigma-col">' +
+                 '<div class="drill-enigma-col-header ' + cssClass + '">' + stageLabel + '</div>' +
+                 '<div class="drill-enigma-empty">' + t('drillNoRecord') + '</div>' +
+               '</div>';
+      }
+      var keys = Object.keys(record).sort();
+      if (keys.length === 0) {
+        return '<div class="drill-enigma-col">' +
+                 '<div class="drill-enigma-col-header ' + cssClass + '">' + stageLabel + '</div>' +
+                 '<div class="drill-enigma-empty">' + t('drillNoRecord') + '</div>' +
+               '</div>';
+      }
+      var rows = '';
+      keys.forEach(function(k) {
+        var rawVal = record[k];
+        var display = (rawVal === null || rawVal === undefined || rawVal === '') ? '' : String(rawVal);
+        rows += '<tr><th>' + _homeDrillEscape(k) + '</th><td>' + _homeDrillFormatVal(display) + '</td></tr>';
+      });
+      return '<div class="drill-enigma-col">' +
+               '<div class="drill-enigma-col-header ' + cssClass + '">' + stageLabel +
+               ' <span style="font-weight:400;color:var(--text-light);text-transform:none;">(' + keys.length + ' ' + t('drillFields') + ')</span></div>' +
+               '<table class="drill-enigma-table"><tbody>' + rows + '</tbody></table>' +
+             '</div>';
+    }
+
+    function renderHomeDrilldown() {
+      var body = document.getElementById('homeDrillBody');
+      var deltas = _homeDrillState.deltas || [];
+      var filter = _homeDrillState.filter;
+      var search = _homeDrillState.search;
+
+      // Apply match_type filter
+      if (filter !== 'all') {
+        deltas = deltas.filter(function(d) { return d.match_type === filter; });
+      }
+      // Apply text search on PN
+      if (search) {
+        deltas = deltas.filter(function(d) {
+          return (d.part_number || '').toLowerCase().indexOf(search) !== -1;
+        });
+      }
+
+      document.getElementById('homeDrillCount').textContent =
+        deltas.length + ' ' + t('drillPnUnit');
+
+      if (deltas.length === 0) {
+        body.innerHTML = '<div class="drill-loading">' + t('drillNoResults') + '</div>';
+        return;
+      }
+
+      var html = '<div class="drill-pn-list">';
+      deltas.forEach(function(d, idx) {
+        var pn = d.part_number || '—';
+        var matchType = d.match_type || '';
+        var ec = d.ec_value || '';
+        var fav = d.fav_value || '';
+        var somaVal = _drillGetField(d, 'to_record', 'SOMA in ZEUS');
+        var zgsFrom = _drillGetField(d, 'from_record', 'ZGS DiaP');
+        var zgsTo = _drillGetField(d, 'to_record', 'ZGS DiaP');
+
+        var summaryTags = '';
+        if (zgsFrom || zgsTo) {
+          summaryTags += '<span class="tag">ZGS: ' + _homeDrillEscape(zgsFrom || '—') + ' → ' + _homeDrillEscape(zgsTo || '—') + '</span>';
+        }
+        if (ec) summaryTags += '<span class="tag ec">EC: ' + _homeDrillEscape(ec) + '</span>';
+        if (fav) summaryTags += '<span class="tag zeus">FAV/ZEUS: ' + _homeDrillEscape(fav) + '</span>';
+        if (somaVal) summaryTags += '<span class="tag soma">SOMA: ' + _homeDrillEscape(somaVal) + '</span>';
+
+        var fromStageLabel = _homeDrillState.fromStage + ' · ' + t('drillFromRecord');
+        var toStageLabel = _homeDrillState.toStage + ' · ' + t('drillToRecord');
+        var enigmaHtml = _renderEnigmaRecord(d.enigma && d.enigma.from_record, fromStageLabel, 'from') +
+                         _renderEnigmaRecord(d.enigma && d.enigma.to_record, toStageLabel, 'to');
+
+        html +=
+          '<div class="drill-pn-item" data-idx="' + idx + '">' +
+            '<div class="drill-pn-header" onclick="toggleHomeDrillPn(this)">' +
+              '<span class="drill-pn-caret">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="9 18 15 12 9 6"/></svg>' +
+              '</span>' +
+              '<span class="drill-pn-number">' + _homeDrillEscape(pn) + '</span>' +
+              '<span class="drill-pn-type ' + matchType + '">' + _drillTypeLabel(matchType) + '</span>' +
+              '<span class="drill-pn-summary">' + summaryTags + '</span>' +
+            '</div>' +
+            '<div class="drill-enigma">' + enigmaHtml + '</div>' +
+          '</div>';
+      });
+      html += '</div>';
+      body.innerHTML = html;
+    }
+
+    function toggleHomeDrillPn(headerEl) {
+      var item = headerEl.parentElement;
+      item.classList.toggle('expanded');
+    }
+
     // ==================== Tab Switching ====================
     function isMobile() {
       return window.innerWidth <= 768;
@@ -4614,527 +5080,6 @@
           '</div>' +
         '</div>';
       }).join('');
-    }
-
-    // ==================== Dashboard ====================
-    async function loadDashboard() {
-      try {
-        var res = await fetch('/api/dashboard');
-        var json = await res.json();
-        if (json.success) {
-          _dashboardData = json.data;
-          renderDashboard(json.data);
-        }
-      } catch (e) {
-        console.error('Dashboard load error:', e);
-      }
-    }
-
-    function destroyCharts() {
-      Object.keys(chartInstances).forEach(function(key) {
-        if (chartInstances[key]) {
-          chartInstances[key].destroy();
-          chartInstances[key] = null;
-        }
-      });
-    }
-
-    function renderDashboard(data) {
-      if (!data) return;
-      if (typeof Chart === 'undefined') return;
-
-      // Set Chart.js defaults
-      Chart.defaults.font.family = "'Noto Sans SC', sans-serif";
-      Chart.defaults.color = '#6c757d';
-
-      // ---- Stat cards (clickable for drill-down) ----
-      var icons = {
-        parts: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7v10c0 5.55 3.84 9.74 9 11 5.16-1.26 9-5.45 9-11V7l-10-5zm0 2.18L19 8.5v8.32c0 3.96-2.86 7.5-7 8.82-4.14-1.32-7-4.86-7-8.82V8.5l7-4.32zM11 7v6h2V7h-2zm0 8v2h2v-2h-2z"/></svg>',
-        ec: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14h-2v-4h2v4zm0-6h-2V7h2v4z"/></svg>',
-        database: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3C7.58 3 4 4.79 4 7s3.58 4 8 4 8-1.79 8-4-3.58-4-8-4zm0 14c-4.42 0-8-1.79-8-4v3c0 2.21 3.58 4 8 4s8-1.79 8-4v-3c0 2.21-3.58 4-8 4z"/></svg>',
-        fav: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>',
-        soma: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
-      };
-
-      var stats = [
-        { value: data.unique_part_numbers || 0, label: 'totalPN', color: 'blue', icon: 'parts', drill: { dim: 'all', val: '' } },
-        { value: data.ec_pn_count || 0, label: 'ecPNCount', color: 'orange', icon: 'ec', drill: { dim: 'ec', val: 'has_ec' } },
-        { value: data.ec_count || 0, label: 'ecCount', color: 'green', icon: 'database', drill: { dim: 'ec', val: 'has_ec' } },
-        { value: data.fav_count || 0, label: 'favCount', color: 'purple', icon: 'fav', drill: { dim: 'fav', val: 'has_fav' } },
-        { value: data.soma_count || 0, label: 'somaCount', color: 'blue', icon: 'soma', drill: { dim: 'soma', val: 'ja' } },
-      ];
-
-      document.getElementById('dashboardStats').innerHTML = stats.map(function(s) {
-        return '<div class="stat-card" style="cursor:pointer;" onclick="openDrilldown(\'' + s.drill.dim + '\',\'' + s.drill.val + '\')">' +
-          '<div class="stat-icon ' + s.color + '">' + icons[s.icon] + '</div>' +
-          '<div class="stat-info">' +
-            '<div class="stat-value">' + (s.value != null ? s.value : 0) + '</div>' +
-            '<div class="stat-label">' + t(s.label) + '</div>' +
-          '</div>' +
-        '</div>';
-      }).join('');
-
-      // Destroy existing charts before recreating
-      destroyCharts();
-
-      // Common chart click handler for doughnut charts
-      function makeDoughnutClickHandler(drillDim, drillValues) {
-        return function(evt, elements) {
-          if (elements.length > 0) {
-            var idx = elements[0].index;
-            openDrilldown(drillDim, drillValues[idx]);
-          }
-        };
-      }
-
-      // ---- Chart 1: SOMA Distribution (doughnut) ----
-      var somaYesVal = data.soma_yes || 0;
-      var somaNoVal = data.soma_no || 0;
-      if (data.soma_distribution && data.soma_distribution.length > 0) {
-        somaYesVal = 0;
-        somaNoVal = 0;
-        data.soma_distribution.forEach(function(item) {
-          var val = (item.value || '').toLowerCase();
-          if (val === 'ja' || val === 'yes' || val === '是') somaYesVal += item.count;
-          else somaNoVal += item.count;
-        });
-      }
-
-      var somaCtx = document.getElementById('somaChart');
-      if (somaCtx) {
-        chartInstances.soma = new Chart(somaCtx, {
-          type: 'doughnut',
-          data: {
-            labels: [t('somaYes'), t('somaNo')],
-            datasets: [{
-              data: [somaYesVal, somaNoVal],
-              backgroundColor: ['#28a745', '#dc3545'],
-              borderWidth: 2,
-              borderColor: '#ffffff',
-              hoverOffset: 8
-            }]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            onClick: makeDoughnutClickHandler('soma', ['ja', 'nein']),
-            onHover: function(evt, elements) { evt.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default'; },
-            plugins: {
-              legend: { position: 'bottom', labels: { font: { family: "'Noto Sans SC', sans-serif" } } },
-              tooltip: { callbacks: {
-                label: function(ctx) { return ctx.label + ': ' + ctx.raw + ' ' + t('drillRecords'); }
-              }}
-            }
-          }
-        });
-      }
-
-      // ---- Chart 2: Source Distribution (bar) ----
-      var sourceCtx = document.getElementById('sourceChart');
-      var sourceLabels = [];
-      var sourceData = [];
-      if (sourceCtx) {
-        if (data.source_distribution && data.source_distribution.length > 0) {
-          data.source_distribution.forEach(function(item) {
-            sourceLabels.push(item.label || 'Unknown');
-            sourceData.push(item.count || 0);
-          });
-        }
-        chartInstances.source = new Chart(sourceCtx, {
-          type: 'bar',
-          data: {
-            labels: sourceLabels,
-            datasets: [{
-              label: t('sourceDistribution'),
-              data: sourceData,
-              backgroundColor: '#0066cc',
-              borderRadius: 6,
-              hoverBackgroundColor: '#0052a3'
-            }]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            onClick: function(evt, elements) {
-              if (elements.length > 0) {
-                var idx = elements[0].index;
-                openDrilldown('source', sourceLabels[idx]);
-              }
-            },
-            onHover: function(evt, elements) { evt.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default'; },
-            plugins: { legend: { display: false } },
-            scales: {
-              y: { beginAtZero: true, ticks: { precision: 0 } }
-            }
-          }
-        });
-      }
-
-      // ---- Chart 3: Field Coverage (horizontal bar) ----
-      var coverageCtx = document.getElementById('coverageChart');
-      var covLabels = [];
-      var covData = [];
-      if (coverageCtx) {
-        if (data.field_distribution) {
-          Object.keys(data.field_distribution).forEach(function(field) {
-            var info = data.field_distribution[field];
-            covLabels.push(field);
-            covData.push(info.rate != null ? info.rate : 0);
-          });
-        }
-        chartInstances.coverage = new Chart(coverageCtx, {
-          type: 'bar',
-          data: {
-            labels: covLabels,
-            datasets: [{
-              label: t('fieldCoverage') + ' (%)',
-              data: covData,
-              backgroundColor: covData.map(function(v) { return v >= 80 ? '#28a745' : v >= 50 ? '#ffc107' : '#dc3545'; }),
-              borderRadius: 4,
-              hoverBackgroundColor: covData.map(function(v) { return v >= 80 ? '#1e7e34' : v >= 50 ? '#d39e00' : '#bd2130'; })
-            }]
-          },
-          options: {
-            indexAxis: 'y',
-            responsive: true,
-            maintainAspectRatio: false,
-            onClick: function(evt, elements) {
-              if (elements.length > 0) {
-                var idx = elements[0].index;
-                openDrilldown('field', covLabels[idx]);
-              }
-            },
-            onHover: function(evt, elements) { evt.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default'; },
-            plugins: { legend: { display: false } },
-            scales: {
-              x: { beginAtZero: true, max: 100, ticks: { callback: function(v) { return v + '%'; } } }
-            }
-          }
-        });
-      }
-
-      // ---- Chart 4: EC Distribution (doughnut) ----
-      var ecCtx = document.getElementById('ecChart');
-      if (ecCtx) {
-        var ecPn = data.ec_pn_count || 0;
-        var totalPn = data.unique_part_numbers || 0;
-        var noEcPn = Math.max(0, totalPn - ecPn);
-        chartInstances.ec = new Chart(ecCtx, {
-          type: 'doughnut',
-          data: {
-            labels: [t('ecPNCount'), t('drillNoEc')],
-            datasets: [{
-              data: [ecPn, noEcPn],
-              backgroundColor: ['#ffc107', '#e0e6ed'],
-              borderWidth: 2,
-              borderColor: '#ffffff',
-              hoverOffset: 8
-            }]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            onClick: makeDoughnutClickHandler('ec', ['has_ec', 'no_ec']),
-            onHover: function(evt, elements) { evt.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default'; },
-            plugins: {
-              legend: { position: 'bottom', labels: { font: { family: "'Noto Sans SC', sans-serif" } } },
-              tooltip: { callbacks: {
-                label: function(ctx) { return ctx.label + ': ' + ctx.raw + ' ' + t('drillRecords'); }
-              }}
-            }
-          }
-        });
-      }
-
-      // ---- Chart 5: Baulos Stages (grouped bar: PN count + EC count) ----
-      var baulosCtx = document.getElementById('baulosChart');
-      if (baulosCtx && data.baulos_stages && data.baulos_stages.length > 0) {
-        var stages = data.baulos_stages;
-        var stageLabels = stages.map(function(s) { return s.stage; });
-        var pnData = stages.map(function(s) { return s.pn_count || 0; });
-        var ecData = stages.map(function(s) { return s.ec_count || 0; });
-        chartInstances.baulos = new Chart(baulosCtx, {
-          type: 'bar',
-          data: {
-            labels: stageLabels,
-            datasets: [
-              { label: t('pnCount'), data: pnData, backgroundColor: '#0066cc', borderRadius: 6 },
-              { label: t('ecCount'), data: ecData, backgroundColor: '#ffc107', borderRadius: 6 }
-            ]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            onClick: function(evt, elements) {
-              if (elements.length > 0) {
-                var idx = elements[0].index;
-                var stageVal = stages[idx].stage.split(' ')[0].toLowerCase();
-                openDrilldown('baulos', stageVal);
-              }
-            },
-            onHover: function(evt, elements) { evt.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default'; },
-            plugins: {
-              legend: { position: 'bottom', labels: { font: { family: "'Noto Sans SC', sans-serif" } } },
-              tooltip: { callbacks: {
-                label: function(ctx) { return ctx.dataset.label + ': ' + ctx.raw; }
-              }}
-            },
-            scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
-          }
-        });
-      } else if (baulosCtx) {
-        baulosCtx.parentElement.innerHTML = '<div style="text-align:center;color:#999;padding:40px 0;">' + t('noBaulosData') + '</div>';
-      }
-
-      // ---- EC Resolution by Stage ----
-      var ecResCard = document.getElementById('ecResolutionCard');
-      var ecResGrid = document.getElementById('ecResolutionGrid');
-      if (ecResCard && ecResGrid) {
-        var ecRes = data.ec_resolution;
-        if (ecRes && (ecRes.to1_ec_count > 0 || ecRes.to2_ec_count > 0)) {
-          ecResCard.style.display = 'block';
-          ecResGrid.innerHTML = [
-            '<div class="ec-res-item to1">' +
-              '<div class="ec-res-value">' + (ecRes.to1_ec_count || 0) + '</div>' +
-              '<div class="ec-res-label">' + t('ecTO1Count') + '</div>' +
-            '</div>',
-            '<div class="ec-res-item to2">' +
-              '<div class="ec-res-value">' + (ecRes.to2_ec_count || 0) + '</div>' +
-              '<div class="ec-res-label">' + t('ecTO2Count') + '</div>' +
-            '</div>',
-            '<div class="ec-res-item resolved">' +
-              '<div class="ec-res-value">' + (ecRes.resolved || 0) + '</div>' +
-              '<div class="ec-res-label">' + t('ecResolved') + '</div>' +
-              '<div class="ec-res-desc">' + t('ecResolvedDesc') + '</div>' +
-            '</div>',
-            '<div class="ec-res-item remaining">' +
-              '<div class="ec-res-value">' + (ecRes.remaining || 0) + '</div>' +
-              '<div class="ec-res-label">' + t('ecRemaining') + '</div>' +
-              '<div class="ec-res-desc">' + t('ecRemainingDesc') + '</div>' +
-            '</div>'
-          ].join('');
-        } else {
-          ecResCard.style.display = 'none';
-        }
-      }
-    }
-
-    var _drillState = { dimension: '', value: '', page: 1, pageSize: 20, data: null };
-
-    function openDrilldown(dimension, value) {
-      _drillState.dimension = dimension;
-      _drillState.value = value;
-      _drillState.page = 1;
-      _drillState.data = null;
-
-      // Set title based on dimension
-      var titleMap = {
-        'soma': { 'ja': t('drillSomaJa'), 'nein': t('drillSomaNein') },
-        'ec': { 'has_ec': t('drillHasEC'), 'no_ec': t('drillNoEC') },
-        'fav': { 'has_fav': t('drillHasFAV'), 'no_fav': t('drillNoFAV') },
-        'all': { '': t('drillAllRecords') },
-      };
-
-      var titleText = '';
-      if (dimension === 'source') {
-        titleText = t('sourceCol') + ': ' + value;
-      } else if (dimension === 'field') {
-        var display = (_dashboardData && _dashboardData.col_display) ? (_dashboardData.col_display[value] || value) : value;
-        titleText = t('drillFieldFilled') + ': ' + display;
-      } else if (dimension === 'baulos') {
-        titleText = t('baulosStages') + ': ' + value.toUpperCase();
-      } else if (titleMap[dimension] && titleMap[dimension][value]) {
-        titleText = titleMap[dimension][value];
-      } else {
-        titleText = dimension + ': ' + value;
-      }
-
-      document.getElementById('drillTitle').textContent = titleText;
-      document.getElementById('drillMeta').innerHTML = '';
-      document.getElementById('drillFooter').style.display = 'none';
-      document.getElementById('drillBody').innerHTML =
-        '<div class="drill-loading"><div class="spinner"></div><span>' + t('loading') + '</span></div>';
-      document.getElementById('drillOverlay').style.display = 'flex';
-
-      loadDrilldownData();
-    }
-
-    async function loadDrilldownData() {
-      try {
-        var res = await fetch('/api/dashboard/drilldown', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            dimension: _drillState.dimension,
-            value: _drillState.value,
-            page: _drillState.page,
-            page_size: _drillState.pageSize,
-          })
-        });
-        var json = await res.json();
-        if (json.success) {
-          _drillState.data = json.data;
-          renderDrilldownTable(json.data);
-        } else {
-          document.getElementById('drillBody').innerHTML =
-            '<div class="drill-loading"><span>' + (json.error || t('loadFailed')) + '</span></div>';
-        }
-      } catch (e) {
-        console.error('Drilldown error:', e);
-        document.getElementById('drillBody').innerHTML =
-          '<div class="drill-loading"><span>' + t('loadFailed') + '</span></div>';
-      }
-    }
-
-    function renderDrilldownTable(data) {
-      var body = document.getElementById('drillBody');
-      var footer = document.getElementById('drillFooter');
-
-      // Update meta info
-      var metaHtml = '<span>' + t('drillTotal').replace('{n}', data.total) + '</span>';
-      if (data.total_pages > 1) {
-        metaHtml += '<span>' + t('drillPage').replace('{cur}', data.page).replace('{total}', data.total_pages) + '</span>';
-      }
-      document.getElementById('drillMeta').innerHTML = metaHtml;
-
-      if (!data.records || data.records.length === 0) {
-        body.innerHTML = '<div class="drill-loading"><span>' + t('drillNoData') + '</span></div>';
-        footer.style.display = 'none';
-        return;
-      }
-
-      // Build table with all fields
-      var allFields = data.all_fields || [];
-      var colDisplay = data.col_display || {};
-
-      // Determine which column is the "key" (drill-down dimension) for highlighting
-      var keyCol = '';
-      var dim = data.dimension || '';
-      if (dim === 'soma') {
-        keyCol = allFields.find(function(f) { return f.toLowerCase().indexOf('soma') >= 0; }) || '';
-      } else if (dim === 'ec') {
-        keyCol = allFields.find(function(f) { return f.toLowerCase().indexOf('ec') >= 0 || f.toLowerCase().indexOf('fehler') >= 0; }) || '';
-      } else if (dim === 'fav') {
-        keyCol = allFields.find(function(f) { return f.toLowerCase().indexOf('fav') >= 0 || f.toLowerCase().indexOf('zeus') >= 0; }) || '';
-      } else if (dim === 'baulos') {
-        keyCol = allFields.find(function(f) { return f.toLowerCase().indexOf('baulos') >= 0; }) || '';
-      } else if (dim === 'field') {
-        keyCol = data.value || '';
-      }
-
-      var html = '<div class="drill-table-wrap"><table class="drill-table"><thead><tr>';
-      html += '<th class="drill-th-source">' + t('sourceCol') + '</th>';
-      allFields.forEach(function(f) {
-        var isKey = (f === keyCol);
-        html += '<th' + (isKey ? ' class="drill-th-key"' : '') + '>' + escapeHtml(colDisplay[f] || f) + (isKey ? ' ★' : '') + '</th>';
-      });
-      html += '</tr></thead><tbody>';
-
-      data.records.forEach(function(rec) {
-        html += '<tr>';
-        // Source column
-        var sourceLabel = rec._source_file || '';
-        if (rec._source_sheet) sourceLabel += ' / ' + rec._source_sheet;
-        html += '<td class="drill-td-source"><span class="empty-val">' + escapeHtml(sourceLabel || '--') + '</span></td>';
-
-        allFields.forEach(function(f) {
-          var val = rec[f];
-          var isKey = (f === keyCol);
-          if (f === 'Part Number' && val) {
-            html += '<td class="pn-cell' + (isKey ? ' drill-td-key' : '') + '" onclick="drillClickPN(\'' + escapeAttr(val) + '\')">' + escapeHtml(val) + '</td>';
-          } else if (val === '' || val == null) {
-            html += '<td' + (isKey ? ' class="drill-td-key"' : '') + '><span class="empty-val">--</span></td>';
-          } else {
-            html += '<td' + (isKey ? ' class="drill-td-key"' : '') + ' title="' + escapeAttr(String(val)) + '">' + escapeHtml(String(val)) + '</td>';
-          }
-        });
-        html += '</tr>';
-      });
-
-      html += '</tbody></table></div>';
-      body.innerHTML = html;
-
-      // Render pagination
-      renderDrilldownPagination(data);
-      footer.style.display = 'flex';
-    }
-
-    function renderDrilldownPagination(data) {
-      var container = document.getElementById('drillPagination');
-      if (data.total_pages <= 1) {
-        container.innerHTML = '<span class="page-info">' + t('drillTotal').replace('{n}', data.total) + '</span>';
-        return;
-      }
-
-      var html = '';
-      html += '<button onclick="drillGoPage(' + (data.page - 1) + ')" ' + (data.page <= 1 ? 'disabled' : '') + '>' + t('drillPrev') + '</button>';
-      html += '<span class="page-info">' + t('drillPage').replace('{cur}', data.page).replace('{total}', data.total_pages) + '</span>';
-      html += '<button onclick="drillGoPage(' + (data.page + 1) + ')" ' + (data.page >= data.total_pages ? 'disabled' : '') + '>' + t('drillNext') + '</button>';
-      container.innerHTML = html;
-    }
-
-    function drillGoPage(page) {
-      if (page < 1) return;
-      _drillState.page = page;
-      document.getElementById('drillBody').innerHTML =
-        '<div class="drill-loading"><div class="spinner"></div><span>' + t('loading') + '</span></div>';
-      loadDrilldownData();
-    }
-
-    function drillClickPN(pn) {
-      closeDrilldown();
-      switchTab('search');
-      setTimeout(function() {
-        var input = document.getElementById('searchInput');
-        if (input) {
-          input.value = pn;
-          performSearch();
-        }
-      }, 100);
-    }
-
-    function closeDrilldown() {
-      document.getElementById('drillOverlay').style.display = 'none';
-      _drillState.data = null;
-    }
-
-    function exportDrillData() {
-      if (!_drillState.data || !_drillState.data.records) return;
-
-      var data = _drillState.data;
-      var allFields = data.all_fields || [];
-      var colDisplay = data.col_display || {};
-
-      // Build CSV
-      var headers = [t('sourceCol')].concat(allFields.map(function(f) { return colDisplay[f] || f; }));
-      var rows = [headers.join(',')];
-
-      data.records.forEach(function(rec) {
-        var sourceLabel = (rec._source_file || '') + (rec._source_sheet ? ' / ' + rec._source_sheet : '');
-        var row = [csvEscape(sourceLabel)];
-        allFields.forEach(function(f) {
-          row.push(csvEscape(rec[f] || ''));
-        });
-        rows.push(row.join(','));
-      });
-
-      // Download
-      var csv = '\ufeff' + rows.join('\n');
-      var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = 'drilldown_' + data.dimension + '_' + (data.value || 'all') + '_p' + data.page + '.csv';
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-
-    function csvEscape(val) {
-      var s = String(val == null ? '' : val);
-      if (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0) {
-        return '"' + s.replace(/"/g, '""') + '"';
-      }
-      return s;
     }
 
     // ==================== Columns ====================
@@ -5472,10 +5417,6 @@
       } catch (e) {
         showToast('Switch failed', 'error');
       }
-    }
-
-    async function loadVersionInfo() {
-      // Version display removed
     }
 
     // ==================== Suggestions ====================
@@ -6005,7 +5946,6 @@
       loadAllPartNumbers();
       loadAgentStatus();
       loadModels();
-      loadVersionInfo();
       renderSearchHistory();
 
       // Initialize delta dashboard (home tab)
@@ -6113,8 +6053,8 @@
       document.addEventListener('keydown', function(e) {
         if (e.key === 'Escape') {
           closeEditModal();
-          closeDrilldown();
           hideAutocomplete();
+          closeHomeDrilldown();
         }
       });
     });
@@ -6175,78 +6115,6 @@
         };
       } catch(e) {}
     }
-
-    // 尝试获取并发槽位（在搜索/问答前调用）
-    function tryAcquireConcurrent(callback) {
-      if (!_concurrentSessionId) {
-        _concurrentSessionId = 'user_' + Math.random().toString(36).substr(2, 9);
-        localStorage.setItem('concurrent_session_id', _concurrentSessionId);
-      }
-      fetch('/api/concurrent/acquire', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({session_id: _concurrentSessionId})
-      }).then(function(r) {
-        if (r.status === 429) {
-          // 并发已满
-          r.json().then(function(data) {
-            updateConcurrencyBanner(data.count, data.max, data.available);
-            if (callback) callback(false, data);
-          });
-        } else {
-          r.json().then(function(data) {
-            if (data.acquired) {
-              updateConcurrencyBanner(data.count, data.max, data.available);
-              startHeartbeat();
-              if (callback) callback(true, data);
-            }
-          });
-        }
-      }).catch(function() {
-        if (callback) callback(true, null); // 网络错误时放行
-      });
-    }
-
-    function releaseConcurrent() {
-      if (!_concurrentSessionId) return;
-      fetch('/api/concurrent/release', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({session_id: _concurrentSessionId})
-      }).catch(function(){});
-      stopHeartbeat();
-    }
-
-    function startHeartbeat() {
-      stopHeartbeat();
-      _heartbeatTimer = setInterval(function() {
-        if (!_concurrentSessionId) return;
-        fetch('/api/concurrent/heartbeat', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({session_id: _concurrentSessionId})
-        }).catch(function(){});
-      }, 30000);
-    }
-
-    function stopHeartbeat() {
-      if (_heartbeatTimer) {
-        clearInterval(_heartbeatTimer);
-        _heartbeatTimer = null;
-      }
-    }
-
-    // 页面卸载时释放槽位
-    window.addEventListener('beforeunload', function() {
-      if (_concurrentSessionId) {
-        // 使用sendBeacon确保请求发送
-        if (navigator.sendBeacon) {
-          var data = new FormData();
-          data.append('session_id', _concurrentSessionId);
-          navigator.sendBeacon('/api/concurrent/release', data);
-        }
-      }
-    });
 
     // 初始化
     document.addEventListener('DOMContentLoaded', function() {

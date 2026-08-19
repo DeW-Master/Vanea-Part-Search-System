@@ -81,14 +81,6 @@
             font-weight: 700;
         }
         header .logo svg { width: 28px; height: 28px; }
-        .version-badge {
-            display: inline-flex; align-items: center;
-            padding: 2px 10px; border-radius: 12px;
-            font-size: 11px; font-weight: 600;
-            background: rgba(255,255,255,0.15); color: rgba(255,255,255,0.85);
-            border: 1px solid rgba(255,255,255,0.2);
-            margin-left: 4px;
-        }
         header .actions { display: flex; gap: 12px; align-items: center; }
 
         .btn {
@@ -1790,7 +1782,6 @@
         }
 
         // ===== File Upload & Analyze =====
-        let selectedFile = null;
         let currentUploadType = 'supplementary'; // 'BOM' or 'supplementary'
         let currentUploadStage = null; // 'pre-TO' / 'TO1' / 'TO2' for BOM uploads
 
@@ -1807,7 +1798,6 @@
             }
             currentUploadType = 'BOM';
             currentUploadStage = stage;
-            selectedFile = file;
             const fileNameEl = document.getElementById('bomFileName');
             fileNameEl.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
             fileNameEl.classList.add('show');
@@ -1825,7 +1815,6 @@
             }
             currentUploadType = 'supplementary';
             currentUploadStage = null;
-            selectedFile = file;
             const fileNameEl = document.getElementById('suppFileName');
             fileNameEl.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
             fileNameEl.classList.add('show');
@@ -2189,7 +2178,6 @@
         function resetUpload() {
             analyzeResult = null;
             mappingState = {};
-            selectedFile = null;
             activeMappingSheet = null;
             currentUploadType = 'supplementary';
             currentUploadStage = null;
@@ -2960,16 +2948,9 @@
             // Apply initial language
             applyTranslations();
 
-            // Load version info
-            loadVersionInfo();
-
             // Check auth status
             checkAuthStatus();
         });
-
-        async function loadVersionInfo() {
-            // Version display removed
-        }
     </script>
 </body>
 </html>

@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 van.ea 车辆零件智能查询系统 - 数据库管理模块
-版本: build20260817
-更新日期: 2026-08-17
 """
 
 import os
@@ -15,7 +13,7 @@ from difflib import SequenceMatcher
 
 import openpyxl
 
-from config import DB_PATH, UPLOAD_TEMP_DIR, PART_NUMBER_HEADERS, DB_TYPE
+from config import DB_PATH, PART_NUMBER_HEADERS, DB_TYPE
 
 db_lock = threading.Lock()
 
@@ -1108,7 +1106,7 @@ class DatabaseManager:
             for r in file_dist
         ]
 
-        # 字段覆盖率（前10个字段）
+        # 字段覆盖率（前15个字段）
         for col_name in col_names[:15]:
             non_empty = conn.execute(
                 f"SELECT COUNT(*) as c FROM parts_data WHERE {_json_field(col_name)} IS NOT NULL AND {_json_field(col_name)} != ''"
@@ -1155,7 +1153,7 @@ class DatabaseManager:
                 title_desc = f"SOMA = Nein/空"
 
         elif dimension == 'ec':
-            ec_cols = [c for c in col_names if any(kw in c.lower() for kw in ['ec']) and 'ec' in c.lower()]
+            ec_cols = [c for c in col_names if 'ec' in c.lower()]
             if not ec_cols:
                 ec_cols = [c for c in col_names if 'fehler' in c.lower()]
             if not ec_cols:
@@ -1461,6 +1459,12 @@ class DatabaseManager:
         - 后阶段有PN但前阶段没有 = 新增零件delta
         - 前阶段有PN但后阶段没有 = PN停用delta
         - BOM开发顺序: pre-TO → TO1 → TO2
+
+        Delta 检测规则：
+        - PN差异：识别后阶段新增/前阶段停用的零件号
+        - ZGS变更：同PN比较ZGS值，不同则标记为ZGS升级
+        - EC检测：检查后阶段PN在ENIGMA记录中是否存在EC(BuendelNr)
+        - ZEUS/FAV：有EC的PN需验证ZEUS(FAV)信息是否已更新
         """
         from config import DELTA_FIELD_CONFIG, DELTA_STAGE_FIELD
         conn = get_db()
@@ -1471,12 +1475,18 @@ class DatabaseManager:
         stage_field = DELTA_STAGE_FIELD
         if stage_field not in col_names:
             conn.close()
-            return {"error": f"Stage field '{stage_field}' not found"}
+            return {"success": False, "error": f"Stage field '{stage_field}' not found"}
 
         # 2-4. 构建两阶段的PN map（复用 _build_stage_pn_map）
         from_map = self._build_stage_pn_map(conn, from_stage, part_number)
         to_map = self._build_stage_pn_map(conn, to_stage, part_number)
         conn.close()
+
+        # 1b. Delta 数据校验：两阶段数据均不能为空
+        if not from_map:
+            return {"success": False, "error": f"Delta 数据校验失败：前阶段 '{from_stage}' 无BOM数据，请先导入该阶段数据"}
+        if not to_map:
+            return {"success": False, "error": f"Delta 数据校验失败：后阶段 '{to_stage}' 无BOM数据，请先导入该阶段数据"}
 
         # 5. PN+ZGS 组合对比（复用 _compute_delta_pairs）
         delta_pairs = self._compute_delta_pairs(from_map, to_map)
@@ -1487,6 +1497,16 @@ class DatabaseManager:
             delta = self._build_delta(
                 pair['part_number'], pair['from_info'], pair['to_info'],
                 pair['match_type'], DELTA_FIELD_CONFIG, col_names)
+            # EC 检测：检查后阶段 PN 在 ENIGMA 记录中是否存在 EC
+            to_data = pair['to_info']['data'] if pair['to_info'] else {}
+            ec_value = str(to_data.get('BuendelNr', '')).strip()
+            delta['has_ec'] = bool(ec_value)
+            delta['ec_value'] = ec_value
+            # ZEUS/FAV 信息更新验证：有EC的PN需验证FAV(ZEUS ID)是否已填写
+            fav_value = str(to_data.get('FAV_fav', '')).strip()
+            delta['has_zeus'] = bool(fav_value)
+            delta['zeus_updated'] = bool(ec_value and fav_value)
+            delta['fav_value'] = fav_value
             deltas.append(delta)
 
         # 6. 排序：ZGS升级优先，然后新增，最后停用
@@ -1511,6 +1531,7 @@ class DatabaseManager:
         paged = deltas[start:start + page_size]
 
         return {
+            "success": True,
             "deltas": paged,
             "summary": summary,
             "total": total,
@@ -1811,12 +1832,15 @@ class DatabaseManager:
         """从 delta pairs 计算 Dashboard KPI 数据。
 
         基于PN+ZGS组合匹配的结果，计算各项KPI指标。
+        EC检测规则：检查后阶段PN在ENIGMA记录中是否存在EC(BuendelNr)，
+        存在即为EC变更（不仅限于EC从无到有的转换）。
+        ZEUS/FAV验证：有EC的PN需验证FAV(ZEUS ID)信息是否已更新。
 
         参数:
             delta_pairs: _compute_delta_pairs 返回的列表
 
         返回:
-            {new_pn, discontinued_pn, zgs_changed, total_delta, new_ec, new_kem, soma_ja}
+            {new_pn, discontinued_pn, zgs_changed, total_delta, new_ec, new_kem, soma_ja, ec_with_zeus}
         """
         new_pn = 0
         discontinued_pn = 0
@@ -1824,6 +1848,7 @@ class DatabaseManager:
         new_ec = 0
         new_kem = 0
         soma_ja = 0
+        ec_with_zeus = 0
 
         for pair in delta_pairs:
             match_type = pair['match_type']
@@ -1840,19 +1865,24 @@ class DatabaseManager:
             from_data = from_info['data'] if from_info else {}
             to_data = to_info['data'] if to_info else {}
 
-            # EC从无到有（BuendelNr字段）
-            from_ec = str(from_data.get('BuendelNr', '')).strip() if from_data else ''
+            # EC检测：后阶段PN在ENIGMA记录中存在EC(BuendelNr)即为EC变更
             to_ec = str(to_data.get('BuendelNr', '')).strip() if to_data else ''
+            from_ec = str(from_data.get('BuendelNr', '')).strip() if from_data else ''
+            has_ec = bool(to_ec)
             ec_added = not from_ec and to_ec
-            if ec_added:
+            if has_ec:
                 new_ec += 1
 
             # KEM从无到有（基于EC新增的KEM释放，KEM是EC的子集）
-            # 只有当EC从无到有时，才统计KEM的新增
             from_kem = str(from_data.get('KEM Number', '')).strip() if from_data else ''
             to_kem = str(to_data.get('KEM Number', '')).strip() if to_data else ''
             if ec_added and not from_kem and to_kem:
                 new_kem += 1
+
+            # ZEUS/FAV信息更新验证：有EC的PN需验证FAV(ZEUS ID)是否已填写
+            to_fav = str(to_data.get('FAV_fav', '')).strip() if to_data else ''
+            if has_ec and to_fav:
+                ec_with_zeus += 1
 
             # SOMA in ZEUS 从无到有 / 从'nein'变为'ja'
             from_soma = str(from_data.get('SOMA in ZEUS', '')).strip().lower() if from_data else ''
@@ -1868,6 +1898,7 @@ class DatabaseManager:
             'new_ec': new_ec,
             'new_kem': new_kem,
             'soma_ja': soma_ja,
+            'ec_with_zeus': ec_with_zeus,
         }
 
     def get_delta_dashboard_data(self):
@@ -1967,6 +1998,9 @@ class DatabaseManager:
         delta1_kpi = {k: v for k, v in delta1_kpi_full.items() if k != 'total_delta'}
         delta2_kpi = {k: v for k, v in delta2_kpi_full.items() if k != 'total_delta'}
 
+        # Delta 数据校验：确保两阶段数据均非空
+        valid = bool(pre_to_map) and bool(to1_map) and bool(to2_map)
+
         # === 3. EC Process Status 饼图数据 ===
         def get_ec_status_distribution(stage):
             clause = self._get_stage_where_clause(stage)
@@ -2009,6 +2043,7 @@ class DatabaseManager:
         conn.close()
 
         return {
+            'valid': valid,
             'stages': stage_stats,
             'delta1': {
                 'label': 'pre-TO → TO1',
@@ -2057,6 +2092,8 @@ class DatabaseManager:
             "ec_added": 0,
             "new_parts": 0,
             "discontinued_parts": 0,
+            "has_ec": 0,
+            "zeus_updated": 0,
         }
         for d in deltas:
             if d['match_type'] == 'zgs_upgraded':
@@ -2068,6 +2105,10 @@ class DatabaseManager:
             for c in d['changes']:
                 if c['business'] == 'EC' and c['change_type'] == 'added':
                     summary['ec_added'] += 1
+            if d.get('has_ec'):
+                summary['has_ec'] += 1
+            if d.get('zeus_updated'):
+                summary['zeus_updated'] += 1
         return summary
 
 

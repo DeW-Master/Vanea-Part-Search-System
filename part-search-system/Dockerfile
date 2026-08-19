@@ -1,12 +1,10 @@
 # ============================================
 # van.ea 车辆零件智能查询系统 - Docker 镜像
-# 版本: build20260817 (Phase 3)
 # ============================================
 FROM python:3.9-slim
 
 # ---------- 镜像元信息 ----------
 LABEL maintainer="R&D Team"
-LABEL version="build20260817"
 LABEL description="van.ea Vehicle Parts Intelligent Query System"
 LABEL app.name="van.ea Part Search"
 LABEL app.codename="van.ea"

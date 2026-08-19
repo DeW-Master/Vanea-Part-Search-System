@@ -101,7 +101,7 @@ tr:nth-child(even) { background: #f8f9fa; }
 
 <header>
   <h1>van.ea 车辆零件智能查询系统</h1>
-  <div class="meta">文档更新日期: 2026-08-17 | 研发组</div>
+  <div class="meta">研发组</div>
 </header>
 
 <nav>
@@ -144,7 +144,7 @@ tr:nth-child(even) { background: #f8f9fa; }
 <section id="features">
   <h2>功能总览</h2>
 
-  <h3>v1.3.0 新增功能（2026-08-14）</h3>
+  <h3>新增功能（2026-08-14）</h3>
   <table>
     <tr><th>功能</th><th>说明</th><th>入口</th></tr>
     <tr><td>并发搜索控制</td><td>默认上限3人，支持后台自定义，SSE实时通知超员/释放状态</td><td>主页顶部通知条 / 后台管理</td></tr>
@@ -158,17 +158,17 @@ tr:nth-child(even) { background: #f8f9fa; }
 
   <h3>已有功能</h3>
   <table>
-    <tr><th>功能</th><th>说明</th><th>版本</th></tr>
-    <tr><td>动态数据库</td><td>多Excel文件上传，表头自动合并，统一查询</td><td>v1.0.0</td></tr>
-    <tr><td>零件号搜索</td><td>按PN精确搜索，支持模糊匹配，结果导出CSV</td><td>v1.0.0</td></tr>
-    <tr><td>管理后台</td><td>密码认证，文件管理，列名映射，数据库统计</td><td>v1.0.0</td></tr>
-    <tr><td>双语界面</td><td>中文/英文一键切换，i18n国际化</td><td>v1.0.0</td></tr>
-    <tr><td>AI智能体</td><td>自然语言查询，多轮对话，流式输出，可停止</td><td>v1.1.0</td></tr>
-    <tr><td>模型管理</td><td>本地Ollama模型下载/切换，云端API配置</td><td>v1.1.0</td></tr>
-    <tr><td>阶段Delta</td><td>pre-TO/TO1/TO2阶段物料差异对比</td><td>v1.1.0</td></tr>
-    <tr><td>BOM/补充文件</td><td>区分BOM物料清单和补充信息文件上传</td><td>v1.2.0</td></tr>
-    <tr><td>PN+ZGS匹配</td><td>Delta匹配采用PN+ZGS组合对比逻辑</td><td>v1.2.0</td></tr>
-    <tr><td>GPU优化</td><td>Flash Attention、KV Cache量化加速推理</td><td>v1.2.0</td></tr>
+    <tr><th>功能</th><th>说明</th></tr>
+    <tr><td>动态数据库</td><td>多Excel文件上传，表头自动合并，统一查询</td></tr>
+    <tr><td>零件号搜索</td><td>按PN精确搜索，支持模糊匹配，结果导出CSV</td></tr>
+    <tr><td>管理后台</td><td>密码认证，文件管理，列名映射，数据库统计</td></tr>
+    <tr><td>双语界面</td><td>中文/英文一键切换，i18n国际化</td></tr>
+    <tr><td>AI智能体</td><td>自然语言查询，多轮对话，流式输出，可停止</td></tr>
+    <tr><td>模型管理</td><td>本地Ollama模型下载/切换，云端API配置</td></tr>
+    <tr><td>阶段Delta</td><td>pre-TO/TO1/TO2阶段物料差异对比</td></tr>
+    <tr><td>BOM/补充文件</td><td>区分BOM物料清单和补充信息文件上传</td></tr>
+    <tr><td>PN+ZGS匹配</td><td>Delta匹配采用PN+ZGS组合对比逻辑</td></tr>
+    <tr><td>GPU优化</td><td>Flash Attention、KV Cache量化加速推理</td></tr>
   </table>
 </section>
 
@@ -455,25 +455,21 @@ docker stop part-search-system && docker rm part-search-system</code></pre>
 </section>
 
 <section id="version">
-  <h2>构建与部署版本</h2>
+  <h2>构建与部署</h2>
 
-  <h3>当前构建：build20260817 (2026-08-17)</h3>
-  <p>系统页面上不再显示版本号，仅在后台日志、API和配置文件中保留构建标识。版本号采用 <code>build + yyyymmdd</code> 格式命名。</p>
+  <p>系统页面上不显示版本号，构建标识仅保留在配置文件中。版本号采用 <code>build + yyyymmdd</code> 格式命名。</p>
 
   <table>
     <tr><th>组件</th><th>位置</th><th>说明</th></tr>
     <tr><td>版本号定义</td><td><code>config.py</code> → <code>APP_VERSION</code></td><td>修改此处更新构建标识</td></tr>
     <tr><td>版本历史</td><td><code>config.py</code> → <code>VERSION_HISTORY</code></td><td>所有构建的功能更新记录</td></tr>
-    <tr><td>Python文件头</td><td><code>app.py</code>/<code>database.py</code>/<code>agent.py</code>/<code>config.py</code></td><td>标注构建号和更新内容</td></tr>
-    <tr><td>Docker镜像标签</td><td><code>Dockerfile</code> LABEL / <code>docker-compose.yml</code></td><td>构建时指定构建号标签</td></tr>
     <tr><td>版本API</td><td><code>GET /api/version</code></td><td>返回构建号、名称、构建日期、完整历史</td></tr>
   </table>
 
   <h3>升级流程</h3>
   <ol>
-    <li>修改 <code>config.py</code> 中的 <code>APP_VERSION</code>（格式：<code>build20260817</code>）</li>
+    <li>修改 <code>config.py</code> 中的 <code>APP_VERSION</code>（格式：<code>build + yyyymmdd</code>）</li>
     <li>在 <code>VERSION_HISTORY</code> 列表顶部添加新构建记录</li>
-    <li>更新所有Python文件头部的构建号和更新说明</li>
     <li>重新构建Docker镜像：<code>docker-compose up -d --build</code></li>
   </ol>
 </section>
@@ -481,8 +477,8 @@ docker stop part-search-system && docker rm part-search-system</code></pre>
 </div>
 
 <div class="footer">
-  van.ea 车辆零件智能查询系统 | FBAC R&D | 2026-08-17<br>
-  本文档随系统源代码一同维护，采用 build+日期 命名规范
+  van.ea 车辆零件智能查询系统 | FBAC R&D<br>
+  本文档随系统源代码一同维护
 </div>
 
 </body>

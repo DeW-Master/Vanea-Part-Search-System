@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 van.ea 车辆零件智能查询系统 - Ollama 多实例负载均衡器
-版本: v2.0.0 (Phase 3)
-更新日期: 2026-08-17
 
 功能:
     - 支持多 Ollama 实例集群: round_robin / least_conn / random
@@ -19,8 +17,7 @@ import random
 import threading
 import urllib.request
 import urllib.error
-from collections import deque
-from typing import List, Dict, Optional, Callable, Any, Tuple
+from typing import List, Dict, Optional, Callable, Tuple
 
 from config import (
     OLLAMA_URLS, OLLAMA_LB_STRATEGY,
@@ -329,73 +326,6 @@ class OllamaLoadBalancer:
 
         assert last_exc is not None
         raise last_exc
-
-    # ============== 便捷 API (兼容原有 agent.py) ==============
-    def get_available_models(self) -> List[Dict]:
-        """
-        从任意健康节点获取已下载模型列表。
-        合并所有健康节点的结果并去重。
-        """
-        models = {}
-        with self._nodes_lock:
-            nodes = [n for n in self._nodes if n.healthy]
-
-        for node in nodes:
-            try:
-                req = urllib.request.Request(f"{node.url}/api/tags", method='GET')
-                with urllib.request.urlopen(req, timeout=5) as resp:
-                    data = json.loads(resp.read().decode('utf-8'))
-                    for m in data.get('models', []):
-                        name = m.get('name', '')
-                        if name and name not in models:
-                            models[name] = {
-                                'name': name,
-                                'size': m.get('size', 0),
-                                'size_gb': round(m.get('size', 0) / 1024 / 1024 / 1024, 2) if m.get('size') else 0,
-                                'modified': m.get('modified_at', ''),
-                                'from_node': node.url,
-                            }
-            except Exception:
-                continue
-        return list(models.values())
-
-    def pull_model(self, model_name: str, node_url: Optional[str] = None) -> bool:
-        """在指定节点或所有健康节点下载模型。"""
-        target_nodes = []
-        with self._nodes_lock:
-            if node_url:
-                target_nodes = [n for n in self._nodes if n.url == node_url]
-            else:
-                target_nodes = [n for n in self._nodes if n.healthy]
-
-        if not target_nodes:
-            return False
-
-        def _do_pull(node: OllamaNode):
-            try:
-                payload = json.dumps({"name": model_name}).encode('utf-8')
-                req = urllib.request.Request(
-                    f"{node.url}/api/pull",
-                    data=payload,
-                    headers={'Content-Type': 'application/json'},
-                    method='POST',
-                )
-                with urllib.request.urlopen(req, timeout=None):
-                    pass
-                return True
-            except Exception as e:
-                print(f"[Ollama-LB] 拉取模型失败 {node.url}: {e}")
-                return False
-
-        results = []
-        threads = []
-        for n in target_nodes:
-            t = threading.Thread(target=lambda nd: results.append(_do_pull(nd)), args=(n,), daemon=True)
-            t.start()
-            threads.append(t)
-        for t in threads:
-            t.join(timeout=OLLAMA_REQUEST_TIMEOUT)
-        return any(results)
 
     # ============== metrics 回调 ==============
     def register_metric_callback(self, name: str, cb: Callable):

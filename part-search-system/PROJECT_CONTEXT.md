@@ -2,7 +2,7 @@
 
 > F-Brain 智能问答 · Delta 阶段对比 · BOM 零件搜索
 
-**构建版本**: build20260817 | **更新**: 2026-08-17 | **技术栈**: Flask + SQLite/PostgreSQL + Redis + Ollama
+**技术栈**: Flask + SQLite/PostgreSQL + Redis + Ollama
 
 ---
 
@@ -143,7 +143,7 @@ part-search-system/
 
 ---
 
-## 关键优化（build20260817）
+## 关键优化
 
 - ✅ **多副本部署**: 支持 Docker Swarm / k8s 多实例部署，Redis 统一 Session
 - ✅ **Ollama 负载均衡**: 多节点轮询 + 自动故障转移
@@ -181,7 +181,4 @@ part-search-system/
 
 ## 构建历史
 
-- **build20260817**: 移除页面版本号显示，升级 Phase 3 分布式架构
-- **v1.4.0**: 目录重组 + Nginx + Redis + Delta预计算 + KPI逻辑修正
-- **v1.3.0**: Homepage 重构为 Delta Dashboard + 双漏斗图
-- **v1.0-v1.2**: 基础功能（搜索/Delta/F-Brain/管理后台/多语言）
+构建版本记录统一维护在 `backend/config.py` 的 `VERSION_HISTORY` 中。

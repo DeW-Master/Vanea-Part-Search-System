@@ -1,10 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 van.ea 车辆零件智能查询系统 - 智能体模块
-版本: v1.3.0
-更新日期: 2026-08-14
 
-v1.3.0 更新内容:
 - 建议问题动态生成（每次刷新随机变化）
 - 支持并发搜索控制集成
 
@@ -19,7 +16,7 @@ import threading
 import urllib.request
 import urllib.error
 
-from database import db_manager, is_part_number_header, serialize_value
+from database import db_manager
 from config import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_REQUEST_TIMEOUT
 
 # ============ Phase 3: Ollama 负载均衡器 (懒加载，失败回退直连 OLLAMA_URL) ============
@@ -466,9 +463,6 @@ COMPARE_KEYWORDS = [
     'diff', 'difference', 'between', '之间', '和...比', '跟...比', '哪个',
     'vergleichen', 'vergleich', 'gegenüberstellen', 'unterschied', 'unterschiede', 'unterschiedlich', 'zwischen', 'gegen',
 ]
-
-# 对比连接词
-COMPARE_CONJUNCTIONS = ['和', '与', '跟', '跟', 'vs', 'versus', '和', '、', '以及', 'und', 'mit', 'gegen', 'gegenüber']
 
 
 def detect_compare_intent(query):

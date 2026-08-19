@@ -1,15 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 van.ea 车辆零件智能查询系统 - 后端服务
-版本: v1.4.0
-更新日期: 2026-08-17
 
-v1.4.0 更新内容:
-- 新增 Nginx 反向代理支持（静态文件加速、gzip压缩）
-- 新增 Redis 缓存层（搜索结果、Delta数据、统计数据缓存）
-- 新增 Delta 预计算 + 定时刷新（后台线程，毫秒级响应）
-- 新增 /api/health 健康检查接口
-- 新增 /api/admin/cache/clear 缓存清理接口
+功能:
+- Nginx 反向代理支持（静态文件加速、gzip压缩）
+- Redis 缓存层（搜索结果、Delta数据、统计数据缓存）
+- Delta 预计算 + 定时刷新（后台线程，毫秒级响应）
+- /api/health 健康检查接口
+- /api/admin/cache/clear 缓存清理接口
 - Redis 不可用时自动降级为无缓存模式
 
 支持：动态数据库、多Excel合并、密码认证、双语界面、智能体、阶段Delta、Redis缓存
@@ -19,15 +17,13 @@ import os
 import json
 import hashlib
 import hmac
-import tempfile
 import time
 import threading
 import uuid
 from datetime import datetime, timedelta
 from collections import deque
-from flask import Flask, request, jsonify, session, send_from_directory, redirect, url_for, Response, stream_with_context
+from flask import Flask, request, jsonify, session, send_from_directory, Response, stream_with_context
 from flask_cors import CORS
-import openpyxl
 
 from config import (
     SECRET_KEY, ADMIN_PASSWORD, UPLOAD_TEMP_DIR, ALLOWED_EXTENSIONS,
@@ -38,7 +34,7 @@ from config import (
     SESSION_USE_SIGNER, SESSION_KEY_PREFIX, SESSION_FILE_DIR,
     METRICS_ENABLED, DB_TYPE, CORS_ORIGINS,
 )
-from database import db_manager, serialize_value, is_part_number_header
+from database import db_manager
 
 # ============ Phase 3: 模块延迟导入 (避免循环引用) ============
 # 延迟导入: metrics, leader_election, ollama_lb
@@ -60,7 +56,6 @@ def _init_phase3_modules():
     # 1. Flask Session: 多副本部署必需 (Redis Session 默认)
     try:
         from flask_session import Session
-        from datetime import timedelta
 
         if SESSION_TYPE == 'redis' and _redis_client is not None:
             app.config.update(
@@ -1397,6 +1392,10 @@ def get_delta():
             page_size=page_size
         )
 
+        # Delta 数据校验失败（阶段数据为空等）：透传错误信息
+        if isinstance(result, dict) and result.get('success') is False:
+            return jsonify(result), 400
+
         response_data = {'success': True, 'data': result, 'from_cache': False}
 
         # 写入缓存
@@ -1740,55 +1739,48 @@ def stats_enhanced():
     if not is_authenticated():
         return jsonify({'success': False, 'error': 'Unauthorized'}), 403
     basic = db_manager.get_stats()
-    conn = db_manager.get_db_conn() if hasattr(db_manager, 'get_db_conn') else None
 
     # 文件级别的记录数统计
-    file_stats = []
     from database import get_db
-    conn2 = get_db()
-    files = conn2.execute(
-        "SELECT id, filename, original_filename, upload_date, total_rows, file_type, stage "
-        "FROM uploaded_files ORDER BY upload_date DESC"
-    ).fetchall()
-
-    total_records = 0
-    for f in files:
-        total_records += f['total_rows'] or 0
-
-    # 计算每个文件对列数的贡献
-    file_column_contributions = []
-    for f in files:
-        rows = conn2.execute(
-            "SELECT data FROM parts_data WHERE file_id = ? LIMIT 1", [f['id']]
-        ).fetchall()
-        col_count = 0
-        if rows:
-            import json as _json
-            data = _json.loads(rows[0]['data'])
-            col_count = len([k for k, v in data.items() if v not in (None, '', 'N/A')])
-        file_column_contributions.append({
-            'file_id': f['id'],
-            'filename': f['original_filename'],
-            'columns': col_count,
-        })
-
-    total_columns = db_manager.get_column_count() if hasattr(db_manager, 'get_column_count') else 0
+    conn = get_db()
     try:
-        total_columns = len(conn2.execute(
+        files = conn.execute(
+            "SELECT id, filename, original_filename, upload_date, total_rows, file_type, stage "
+            "FROM uploaded_files ORDER BY upload_date DESC"
+        ).fetchall()
+
+        total_records = 0
+        for f in files:
+            total_records += f['total_rows'] or 0
+
+        # 计算每个文件对列数的贡献
+        file_column_contributions = []
+        for f in files:
+            rows = conn.execute(
+                "SELECT data FROM parts_data WHERE file_id = ? LIMIT 1", [f['id']]
+            ).fetchall()
+            col_count = 0
+            if rows:
+                data = json.loads(rows[0]['data'])
+                col_count = len([k for k, v in data.items() if v not in (None, '', 'N/A')])
+            file_column_contributions.append({
+                'file_id': f['id'],
+                'filename': f['original_filename'],
+                'columns': col_count,
+            })
+
+        total_columns = len(conn.execute(
             "SELECT id FROM unified_columns"
         ).fetchall())
-    except Exception:
-        pass
-
-    conn2.close()
+    finally:
+        conn.close()
 
     file_details = []
     for f in files:
         file_size_kb = 0
-        import os as _os
-        filepath = _os.path.join(UPLOAD_TEMP_DIR, f['filename'])
-        if _os.path.exists(filepath):
-            file_size_kb = round(_os.path.getsize(filepath) / 1024, 1)
+        filepath = os.path.join(UPLOAD_TEMP_DIR, f['filename'])
+        if os.path.exists(filepath):
+            file_size_kb = round(os.path.getsize(filepath) / 1024, 1)
 
         col_info = next((c for c in file_column_contributions if c['file_id'] == f['id']), None)
 
@@ -1839,27 +1831,36 @@ def admin_leader_status():
 
 
 if __name__ == '__main__':
+    cache_status = 'enabled (Redis)' if (_cache_enabled and _redis_client is not None) else 'disabled (降级为无缓存)'
+    delta_status = 'enabled' if DELTA_REFRESH_INTERVAL and DELTA_REFRESH_INTERVAL > 0 else 'disabled'
+    frontend_ok = os.path.isdir(FRONTEND_DIR)
     print("=" * 68)
-    print(f"  {APP_NAME} ({APP_VERSION})")
+    print(f"  {APP_NAME}")
+    print(f"  ├─ 版本:         {APP_VERSION}")
+    print(f"  ├─ 监听:         {FLASK_HOST}:{FLASK_PORT}")
     print(f"  ├─ 数据库:       {DB_TYPE}")
+    print(f"  ├─ 缓存:         {cache_status}")
     print(f"  ├─ Session:      {SESSION_TYPE}")
+    print(f"  ├─ Delta预计算:  {delta_status} (间隔 {DELTA_REFRESH_INTERVAL}s)")
     print(f"  ├─ Metrics:      {'/metrics' if _metrics else 'disabled'}")
-    print(f"  ├─ LeaderElec:   {'enabled' if _leader_elector else 'disabled'}")
+    print(f"  ├─ LeaderElec:   {'enabled' if _leader_elector else 'disabled'}", end="")
     if _leader_elector:
-        print(f"  │                 is_leader={bool(_leader_elector.is_leader)} redis={_leader_elector._redis is not None}")
+        print(f"  is_leader={bool(_leader_elector.is_leader)} redis={_leader_elector._redis is not None}")
+    else:
+        print()
     if _ollama_lb:
         lb_nodes = _ollama_lb.get_all_nodes_status()
         lb_healthy = sum(1 for n in lb_nodes if n.get('healthy'))
         print(f"  ├─ Ollama LB:    {lb_healthy}/{len(lb_nodes)} nodes healthy")
     else:
         print(f"  ├─ Ollama LB:    disabled")
-    print(f"  ├─ Query:        http://localhost:{FLASK_PORT}")
+    print(f"  ├─ 前端目录:     {FRONTEND_DIR}  exists={frontend_ok}")
+    print(f"  ├─ Query:        http://localhost:{FLASK_PORT}/")
     print(f"  ├─ Admin:        http://localhost:{FLASK_PORT}/admin")
     print(f"  ├─ Health:       http://localhost:{FLASK_PORT}/api/health")
     if _metrics:
         print(f"  └─ Metrics:      http://localhost:{FLASK_PORT}/metrics")
     print("  (管理员密码不在此处显示, 通过环境变量 ADMIN_PASSWORD 设置)")
-    print(f"  Frontend dir: {FRONTEND_DIR}  exists={os.path.isdir(FRONTEND_DIR)}")
     print("=" * 68)
     # 本地/原生运行: Flask 内置服务器 (threaded 提升并发);
     # Docker 生产环境通过 Dockerfile 使用 gunicorn 多进程运行。
