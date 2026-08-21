@@ -26,7 +26,7 @@ if [ -z "$PYTHON" ]; then
 fi
 
 README="$REPO_ROOT/README.md"
-SCRIPT="$REPO_ROOT/scripts/update_readme.py"
+SCRIPT="$REPO_ROOT/part-search-system/scripts/update_readme.py"
 
 # 更新前的 README 内容（用哈希判断是否变化）
 BEFORE=""

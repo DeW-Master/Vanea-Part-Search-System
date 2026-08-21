@@ -1,7 +1,7 @@
 @echo off
 REM ============================================================
 REM  Install git pre-push hook (Windows)
-REM  Copies scripts/pre-push to .git/hooks/pre-push
+REM  Copies part-search-system/scripts/pre-push to .git/hooks/pre-push
 REM ============================================================
 
 setlocal

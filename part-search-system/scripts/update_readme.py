@@ -21,9 +21,19 @@ import re
 import subprocess
 import sys
 
-# 仓库根目录（本脚本位于 <root>/scripts/ 下）
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+# 仓库根目录：通过 git 探测（脚本可能位于仓库根的任意子目录）
+def _detect_repo_root():
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        return out or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    except Exception:
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+REPO_ROOT = _detect_repo_root()
 README_PATH = os.path.join(REPO_ROOT, "README.md")
 CONFIG_PATH = os.path.join(
     REPO_ROOT, "part-search-system", "backend", "config.py"

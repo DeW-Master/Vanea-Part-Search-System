@@ -166,6 +166,11 @@ SESSION_LIFETIME_SECONDS = int(os.environ.get("SESSION_LIFETIME_SECONDS", "86400
 SESSION_USE_SIGNER = os.environ.get("SESSION_USE_SIGNER", "true").lower() == "true"
 SESSION_KEY_PREFIX = os.environ.get("SESSION_KEY_PREFIX", "fbrain_session:")
 
+# 会话最大空闲时间（秒）：超过该时间没有任何请求即视为过期并回收资源
+# 默认 60s = 1 分钟。可通过环境变量 SESSION_IDLE_TIMEOUT_SECONDS 调整。
+# 设为 0 或负数表示禁用空闲超时。
+SESSION_IDLE_TIMEOUT_SECONDS = int(os.environ.get("SESSION_IDLE_TIMEOUT_SECONDS", "60"))
+
 # 文件 Session 目录 (SESSION_TYPE=filesystem 时使用)
 SESSION_FILE_DIR = os.environ.get("SESSION_FILE_DIR", os.path.join(DATA_DIR, 'sessions'))
 

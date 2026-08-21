@@ -32,6 +32,7 @@ from config import (
     DELTA_REFRESH_INTERVAL, DELTA_INITIAL_DELAY,
     SESSION_TYPE, SESSION_PERMANENT, SESSION_LIFETIME_SECONDS,
     SESSION_USE_SIGNER, SESSION_KEY_PREFIX, SESSION_FILE_DIR,
+    SESSION_IDLE_TIMEOUT_SECONDS,
     METRICS_ENABLED, DB_TYPE, CORS_ORIGINS,
 )
 from database import db_manager
@@ -569,12 +570,35 @@ def start_delta_background_updater():
 # 启动 Delta 后台刷新线程
 start_delta_background_updater()
 
-# 请求计数中间件
+# 请求计数中间件 + 会话 idle 超时回收
 @app.before_request
 def count_request():
     global _request_count
     with _request_lock:
         _request_count += 1
+
+    # 会话空闲超时：若用户已登录但超过 SESSION_IDLE_TIMEOUT_SECONDS 没有活动，
+    # 主动让出 session 资源（清空 admin_logged_in 与 _last_seen），
+    # 下一次需要鉴权的请求会得到 401，由前端引导重新登录。
+    if SESSION_IDLE_TIMEOUT_SECONDS > 0 and session.get('admin_logged_in'):
+        last_seen = session.get('_last_seen')
+        now_ts = time.time()
+        if last_seen is not None and (now_ts - float(last_seen)) > SESSION_IDLE_TIMEOUT_SECONDS:
+            # 记录一次空闲过期事件（便于监控/报告）
+            try:
+                with _session_metrics_lock:
+                    _session_idle_evictions += 1
+            except Exception:
+                pass
+            session.pop('admin_logged_in', None)
+            session.pop('_last_seen', None)
+        else:
+            # 活跃请求：刷新 last_seen
+            session['_last_seen'] = now_ts
+
+# 会话空闲回收统计
+_session_metrics_lock = threading.Lock()
+_session_idle_evictions = 0
 
 # ============ 认证 ============
 
@@ -588,19 +612,35 @@ def login():
     password = data.get('password', '')
     if isinstance(password, str) and hmac.compare_digest(password.encode('utf-8'), ADMIN_PASSWORD.encode('utf-8')):
         session['admin_logged_in'] = True
-        return jsonify({'success': True, 'message': 'Login successful'})
+        session['_last_seen'] = time.time()
+        return jsonify({
+            'success': True,
+            'message': 'Login successful',
+            'idle_timeout_seconds': SESSION_IDLE_TIMEOUT_SECONDS,
+        })
     return jsonify({'success': False, 'error': 'Incorrect password'}), 401
 
 
 @app.route('/api/auth/logout', methods=['POST'])
 def logout():
     session.pop('admin_logged_in', None)
+    session.pop('_last_seen', None)
     return jsonify({'success': True})
 
 
 @app.route('/api/auth/status')
 def auth_status():
-    return jsonify({'authenticated': is_authenticated()})
+    last_seen = session.get('_last_seen')
+    now_ts = time.time()
+    if SESSION_IDLE_TIMEOUT_SECONDS > 0 and last_seen is not None:
+        remaining = max(0, SESSION_IDLE_TIMEOUT_SECONDS - (now_ts - float(last_seen)))
+    else:
+        remaining = None
+    return jsonify({
+        'authenticated': is_authenticated(),
+        'idle_timeout_seconds': SESSION_IDLE_TIMEOUT_SECONDS,
+        'idle_remaining_seconds': remaining,
+    })
 
 
 # ============ 页面路由 ============

@@ -1,0 +1,30 @@
+# ============================================
+# 仓库根 .gitignore (仓库根 = d:\Trae Workshop\Vanea Part Search System)
+# 业务项目内的 ignore 规则见 part-search-system/.gitignore
+# ============================================
+
+# ---------- Python 虚拟环境 (工作区根的 venv/) ----------
+venv/
+env/
+ENV/
+.venv/
+
+# ---------- 测试产物 ----------
+part-search-system/backend/tests/results/   # 负载测试与性能报告输出
+part-search-system/backend/tests/.pytest_cache/
+part-search-system/backend/.coverage
+part-search-system/backend/.pytest_cache/
+
+# ---------- 负载测试日志 ----------
+*.loadtest.log
+loadtest_run*.log
+
+# ---------- Trae IDE 缓存 ----------
+.trae-html-share-packages/
+部署指南.html
+项目上下文文档.html
+
+# ---------- 业务项目应忽略的临时文件 (避免误提交) ----------
+part-search-system/.trae/
+part-search-system/.vscode/
+part-search-system/frontend/.cache/
