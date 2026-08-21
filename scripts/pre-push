@@ -1,0 +1,50 @@
+#!/bin/sh
+#
+# pre-push 钩子：每次 push 前自动刷新 README.md 中的构建状态区块。
+# 由 scripts/install-hooks.bat 安装到 .git/hooks/pre-push。
+# 若脚本使 README 发生变更，会自动 git add README.md，
+# 从而把最新构建状态一起包含在本次 push 中。
+#
+
+# 定位仓库根目录
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+if [ -z "$REPO_ROOT" ]; then
+    exit 0
+fi
+
+# 优先使用 python，其次 python3
+PYTHON=
+if command -v python >/dev/null 2>&1; then
+    PYTHON=python
+elif command -v python3 >/dev/null 2>&1; then
+    PYTHON=python3
+fi
+
+if [ -z "$PYTHON" ]; then
+    echo "[pre-push] 未找到 python，跳过 README 自动更新。" >&2
+    exit 0
+fi
+
+README="$REPO_ROOT/README.md"
+SCRIPT="$REPO_ROOT/scripts/update_readme.py"
+
+# 更新前的 README 内容（用哈希判断是否变化）
+BEFORE=""
+if [ -f "$README" ]; then
+    BEFORE=$("$PYTHON" -c "import hashlib;print(hashlib.md5(open(r'$README','rb').read()).hexdigest())" 2>/dev/null)
+fi
+
+"$PYTHON" "$SCRIPT"
+
+AFTER=""
+if [ -f "$README" ]; then
+    AFTER=$("$PYTHON" -c "import hashlib;print(hashlib.md5(open(r'$README','rb').read()).hexdigest())" 2>/dev/null)
+fi
+
+# 若 README 被更新，则自动加入暂存区
+if [ -n "$AFTER" ] && [ "$BEFORE" != "$AFTER" ]; then
+    echo "[pre-push] README 构建状态已更新，自动 git add README.md"
+    git -C "$REPO_ROOT" add README.md
+fi
+
+exit 0

@@ -1137,7 +1137,24 @@ def agent_query():
             return jsonify({'success': False, 'error': 'Query required'}), 400
 
         lang = data.get('lang', 'zh')
-        result = agent_manager.process_query(user_query, lang=lang)
+        # 多轮对话上下文: [{role: 'user'|'assistant', content}]
+        history = data.get('history') or []
+        if not isinstance(history, list):
+            history = []
+        # 过滤掉畸形条目，并限制单条长度
+        clean_history = []
+        for h in history[-20:]:
+            if not isinstance(h, dict):
+                continue
+            role = h.get('role')
+            content = h.get('content')
+            if role in ('user', 'assistant', 'agent') and isinstance(content, str) and content.strip():
+                clean_history.append({
+                    'role': 'assistant' if role == 'agent' else role,
+                    'content': content.strip()[:2000],
+                })
+
+        result = agent_manager.process_query(user_query, lang=lang, history=clean_history)
         response_data = {
             'success': True,
             'response': result['response'],
@@ -1514,97 +1531,83 @@ def get_delta_detail():
 
 @app.route('/api/agent/suggestions')
 def agent_suggestions():
-    """动态生成建议问题（每次刷新页面时返回不同的问题组合）"""
+    """基于数据库真实字段和样例值生成可用的搜索提示词。
+
+    返回的提示词均为可直接执行的自然语言搜索语句，而非知识性问答。
+    """
     try:
         import random
-        suggestions_zh = []
-        suggestions_en = []
-        suggestions_de = []
+        hints = db_manager.get_search_hint_samples(limit_per_field=2)
 
-        # 从数据库获取一些真实零件号用于生成动态建议
-        all_pns = db_manager.get_all_part_numbers()
-        sample_pns = random.sample(all_pns, min(4, len(all_pns))) if all_pns else []
+        # 字段 -> (中文模板, 英文模板, 德文模板)，{v} 为样例值占位符
+        templates = {
+            'part_number': (
+                '查询零件号 {v} 的信息', 'Query part number {v}', 'Teilenummer {v} abfragen'),
+            'BuendelNr': (
+                '查找EC号为 {v} 的零件', 'Find parts with EC {v}', 'Teile mit EC {v} finden'),
+            'KEM': (
+                '查找KEM为 {v} 的零件', 'Find parts with KEM {v}', 'Teile mit KEM {v} finden'),
+            'FAV_fav': (
+                '查找FAV为 {v} 的零件', 'Find parts with FAV {v}', 'Teile mit FAV {v} finden'),
+            'ZGS DiaP': (
+                '查找ZGS版本为 {v} 的零件', 'Find parts with ZGS {v}', 'Teile mit ZGS {v} finden'),
+            'SOMA in ZEUS': (
+                '查找SOMA为 {v} 的零件', 'Find parts with SOMA {v}', 'Teile mit SOMA {v} finden'),
+            'Baulos_aggr': (
+                '查找阶段 {v} 的零件', 'Find parts in stage {v}', 'Teile in Stufe {v} finden'),
+            'bndverantwortlicher': (
+                '查找负责人为 {v} 的零件', 'Find parts responsible by {v}', 'Teile verantwortlich von {v} finden'),
+            'status': (
+                '查找状态为 {v} 的零件', 'Find parts with status {v}', 'Teile mit Status {v} finden'),
+            'teilbenennung': (
+                '查找名称包含 {v} 的零件', 'Find parts named like {v}', 'Teile mit Name {v} finden'),
+        }
 
-        # 基础建议问题池
-        base_zh = [
-            '列出所有可用的零件',
-            '什么是EC号？',
-            '什么是ZGS版本号？',
-            '什么是FAV/ZEUS？',
-            '阶段Delta是什么意思？',
-            '如何对比两个零件号？',
-            'BOM和补充文件有什么区别？',
-            'SOMA是什么？',
-        ]
-        base_en = [
-            'List all available parts',
-            'What is an EC number?',
-            'What is a ZGS version?',
-            'What is FAV/ZEUS?',
-            'What does stage Delta mean?',
-            'How to compare two part numbers?',
-            'What is the difference between BOM and supplementary files?',
-            'What is SOMA?',
-        ]
-        base_de = [
-            'Alle verfügbaren Teile auflisten',
-            'Was ist eine EC-Nummer?',
-            'Was ist eine ZGS-Version?',
-            'Was ist FAV/ZEUS?',
-            'Was bedeutet Stadium-Delta?',
-            'Wie vergleicht man zwei Teilenummern?',
-            'Was ist der Unterschied zwischen BOM und Ergänzungsdateien?',
-            'Was ist SOMA?',
-        ]
+        zh, en, de = [], [], []
+        # 组合提示词池：每个字段选取一个样例值
+        pool = []
+        for field, info in hints.items():
+            tmpls = templates.get(field)
+            if not tmpls or not info.get('samples'):
+                continue
+            sample = random.choice(info['samples'])
+            pool.append((tmpls[0].format(v=sample),
+                         tmpls[1].format(v=sample),
+                         tmpls[2].format(v=sample)))
 
-        # 带零件号的动态建议
-        if len(sample_pns) >= 2:
-            suggestions_zh.append(f'查询零件号 {sample_pns[0]} 的信息')
-            suggestions_en.append(f'Query part number {sample_pns[0]}')
-            suggestions_de.append(f'Teilenummer {sample_pns[0]} abfragen')
-            suggestions_zh.append(f'对比 {sample_pns[0]} 和 {sample_pns[1]}')
-            suggestions_en.append(f'Compare {sample_pns[0]} and {sample_pns[1]}')
-            suggestions_de.append(f'{sample_pns[0]} und {sample_pns[1]} vergleichen')
+        random.shuffle(pool)
+        for item in pool[:6]:
+            zh.append(item[0])
+            en.append(item[1])
+            de.append(item[2])
 
-        if len(sample_pns) >= 3:
-            suggestions_zh.append(f'查找与 {sample_pns[2]} 相关的EC变更')
-            suggestions_en.append(f'Find EC changes related to {sample_pns[2]}')
-            suggestions_de.append(f'EC-Änderungen zu {sample_pns[2]} finden')
-
-        # 从基础池中随机选取补充
-        remaining_zh = [q for q in base_zh if q not in suggestions_zh]
-        remaining_en = [q for q in base_en if q not in suggestions_en]
-        remaining_de = [q for q in base_de if q not in suggestions_de]
-        random.shuffle(remaining_zh)
-        random.shuffle(remaining_en)
-        random.shuffle(remaining_de)
-
-        needed = 6 - len(suggestions_zh)
-        suggestions_zh.extend(remaining_zh[:needed])
-        suggestions_en.extend(remaining_en[:needed])
-        suggestions_de.extend(remaining_de[:needed])
-
-        # 最终随机打乱顺序（保持三种语言同步）
-        paired = list(zip(suggestions_zh, suggestions_en, suggestions_de))
-        random.shuffle(paired)
-        suggestions_zh = [p[0] for p in paired[:6]]
-        suggestions_en = [p[1] for p in paired[:6]]
-        suggestions_de = [p[2] for p in paired[:6]]
+        # 若数据库中可用样例不足，补充通用但仍可执行的搜索提示词
+        fallback_zh = ['列出所有可用零件', '查找有EC号的零件', '查找SOMA为ja的零件']
+        fallback_en = ['List all available parts', 'Find parts with EC numbers', 'Find parts where SOMA is ja']
+        fallback_de = ['Alle verfügbaren Teile auflisten', 'Teile mit EC-Nummern finden', 'Teile mit SOMA ja finden']
+        i = 0
+        while len(zh) < 4 and i < len(fallback_zh):
+            zh.append(fallback_zh[i]); en.append(fallback_en[i]); de.append(fallback_de[i]); i += 1
 
         return jsonify({
             'success': True,
-            'suggestions_zh': suggestions_zh,
-            'suggestions_en': suggestions_en,
-            'suggestions_de': suggestions_de,
+            'suggestions_zh': zh[:6],
+            'suggestions_en': en[:6],
+            'suggestions_de': de[:6],
         })
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({
             'success': False,
-            'suggestions_zh': ['列出所有可用的零件', '什么是EC号？', '查询零件信息', '什么是ZGS？', '如何对比零件？', '什么是Delta？'],
-            'suggestions_en': ['List all available parts', 'What is an EC number?', 'Query part info', 'What is ZGS?', 'How to compare parts?', 'What is Delta?'],
-            'suggestions_de': ['Alle verfügbaren Teile auflisten', 'Was ist eine EC-Nummer?', 'Teileinfo abfragen', 'Was ist ZGS?', 'Wie vergleicht man Teile?', 'Was ist Delta?'],
+            'suggestions_zh': ['列出所有可用零件', '查找有EC号的零件', '查找SOMA为ja的零件',
+                              '查询零件号信息', '查找ZGS版本变更', '对比两个零件号'],
+            'suggestions_en': ['List all available parts', 'Find parts with EC numbers',
+                              'Find parts where SOMA is ja', 'Query part number info',
+                              'Find ZGS version changes', 'Compare two part numbers'],
+            'suggestions_de': ['Alle verfügbaren Teile auflisten', 'Teile mit EC-Nummern finden',
+                              'Teile mit SOMA ja finden', 'Teilenummer abfragen',
+                              'ZGS-Versionsänderungen finden', 'Zwei Teilenummern vergleichen'],
         })
 
 

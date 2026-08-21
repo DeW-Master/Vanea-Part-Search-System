@@ -58,8 +58,12 @@ function loadDelta(page) {
           '<p style="color:var(--danger);padding:20px;">' + escapeHtml(res.error || '查询失败') + '</p>';
         document.getElementById('deltaSummary').innerHTML = '';
         document.getElementById('deltaPagination').innerHTML = '';
+        deltaState.deltas = null;
+        deltaState.summary = null;
         return;
       }
+      deltaState.summary = res.data.summary;
+      deltaState.deltas = res.data.deltas;
       renderDeltaSummary(res.data.summary);
       renderDeltaList(res.data.deltas);
       renderDeltaPagination(res.data);
@@ -392,16 +396,19 @@ function getDeltaLabel(key, fallback) {
 function renderDeltaPagination(data) {
   deltaState.total = data.total;
   deltaState.totalPages = data.total_pages;
+  deltaState.page = data.page;
   var el = document.getElementById('deltaPagination');
   if (data.total_pages <= 1) { el.innerHTML = ''; return; }
   var prevLabel = getDeltaLabel('deltaPrevPage', '上一页');
   var nextLabel = getDeltaLabel('deltaNextPage', '下一页');
+  var prevDisabled = (data.page <= 1) ? 'disabled' : '';
+  var nextDisabled = (data.page >= data.total_pages) ? 'disabled' : '';
   el.innerHTML =
-    '<button ' + (data.page <= 1 ? 'disabled' : '') +
+    '<button ' + prevDisabled +
     ' onclick="loadDelta(' + (data.page - 1) + ')">' + prevLabel + '</button>' +
     '<span class="page-info">' + data.page + ' / ' + data.total_pages +
     ' (共' + data.total + '条)</span>' +
-    '<button ' + (data.page >= data.total_pages ? 'disabled' : '') +
+    '<button ' + nextDisabled +
     ' onclick="loadDelta(' + (data.page + 1) + ')">' + nextLabel + '</button>';
 }
 

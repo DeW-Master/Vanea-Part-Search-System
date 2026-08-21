@@ -525,6 +525,7 @@
 
     .chat-tag.mode-ollama { background: var(--info-light); color: var(--info); border-color: var(--info); }
     .chat-tag.mode-rule { background: var(--warning-light); color: var(--warning); border-color: var(--warning); }
+    .chat-tag.mode-cloud { background: var(--purple-light); color: var(--purple); border-color: var(--purple); }
     .chat-tag.related { background: var(--success-light); color: var(--success); border-color: var(--success); }
     .chat-tag.off-topic { background: var(--danger-light); color: var(--danger); border-color: var(--danger); }
     .chat-tag.intent { background: var(--purple-light); color: var(--purple); border-color: var(--purple); }
@@ -803,6 +804,16 @@
     }
     .model-mode.rule { background: var(--warning-light); color: var(--warning); border-color: var(--warning); }
     .model-mode.cloud { background: var(--info-light); color: var(--info); border-color: var(--info); }
+    .model-bar-right { display: flex; align-items: center; gap: 10px; }
+    .new-chat-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 12px; border: 1px solid var(--border-bright);
+      border-radius: var(--radius-sm); background: var(--card-bg);
+      color: var(--text-light); font-size: 12px; font-weight: 600;
+      cursor: pointer; font-family: inherit; transition: all 0.15s;
+    }
+    .new-chat-btn:hover { border-color: var(--silver-dark); color: var(--text); background: var(--bg-alt); }
+    .new-chat-btn svg { width: 14px; height: 14px; }
 
     /* ==================== Search Tab ==================== */
     .search-container {
@@ -2724,7 +2735,13 @@
               <option value="">Loading...</option>
             </select>
           </div>
-          <span class="model-mode" id="modelMode"></span>
+          <div class="model-bar-right">
+            <button class="new-chat-btn" onclick="newChat()" id="newChatBtn" title="新对话">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+              <span data-i18n="newChat">新对话</span>
+            </button>
+            <span class="model-mode" id="modelMode"></span>
+          </div>
         </div>
         <div class="chat-messages" id="chatMessages"></div>
         <div class="chat-scroll-tip" id="chatScrollTip">
@@ -2952,6 +2969,8 @@
         collapseRecords: '收起',
         modeOllama: 'Ollama模式',
         modeRule: '规则模式',
+        modeCloud: '云端模式',
+        newChat: '新对话',
         related: '表内相关',
         offTopic: '表外无关',
         searchResults: '搜索结果',
@@ -3167,6 +3186,8 @@
         collapseRecords: 'Collapse',
         modeOllama: 'Ollama Mode',
         modeRule: 'Rule Mode',
+        modeCloud: 'Cloud Mode',
+        newChat: 'New Chat',
         related: 'Table Related',
         offTopic: 'Off Topic',
         searchResults: 'Search Results',
@@ -3385,6 +3406,8 @@
         collapseRecords: 'Einklappen',
         modeOllama: 'Ollama-Modus',
         modeRule: 'Regelmodus',
+        modeCloud: 'Cloud-Modus',
+        newChat: 'Neuer Chat',
         related: 'Tabellenbezogen',
         offTopic: 'Nicht themenbezogen',
         searchResults: 'Suchergebnisse',
@@ -3618,7 +3641,9 @@
       // Update agent status text
       const statusEl = document.getElementById('agentModeText');
       if (statusEl && statusEl.dataset.mode) {
-        statusEl.textContent = statusEl.dataset.mode === 'ollama' ? t('modeOllama') : t('modeRule');
+        if (statusEl.dataset.mode === 'cloud') statusEl.textContent = t('modeCloud');
+        else if (statusEl.dataset.mode === 'ollama') statusEl.textContent = t('modeOllama');
+        else statusEl.textContent = t('modeRule');
       } else if (statusEl && statusEl.dataset.offline === 'true') {
         statusEl.textContent = t('agentOffline');
       }
@@ -5248,7 +5273,9 @@
             badge.classList.remove('offline');
             text.dataset.mode = json.mode || 'rule';
             text.dataset.offline = 'false';
-            text.textContent = (json.mode === 'ollama') ? t('modeOllama') : t('modeRule');
+            if (json.mode === 'cloud') text.textContent = t('modeCloud');
+            else if (json.mode === 'ollama') text.textContent = t('modeOllama');
+            else text.textContent = t('modeRule');
           } else {
             badge.classList.add('offline');
             text.dataset.mode = '';
@@ -5298,8 +5325,12 @@
 
           if (extra.mode) {
             const modeTag = document.createElement('span');
-            modeTag.className = 'chat-tag ' + (extra.mode === 'ollama' ? 'mode-ollama' : 'mode-rule');
-            modeTag.textContent = extra.mode === 'ollama' ? t('modeOllama') : t('modeRule');
+            let modeCls = 'mode-rule';
+            let modeText = t('modeRule');
+            if (extra.mode === 'cloud') { modeCls = 'mode-cloud'; modeText = t('modeCloud'); }
+            else if (extra.mode === 'ollama') { modeCls = 'mode-ollama'; modeText = t('modeOllama'); }
+            modeTag.className = 'chat-tag ' + modeCls;
+            modeTag.textContent = modeText;
             meta.appendChild(modeTag);
           }
 
@@ -5391,6 +5422,17 @@
     }
 
     var _agentAbortController = null;
+    // 多轮对话上下文 (仅内存，不持久化)
+    var chatHistory = [];
+
+    function newChat() {
+      chatHistory = [];
+      var container = document.getElementById('chatMessages');
+      if (container) container.innerHTML = '';
+      renderSuggestions();
+      var input = document.getElementById('chatInput');
+      if (input) input.focus();
+    }
 
     async function sendAgentQuery(queryText) {
       const input = document.getElementById('chatInput');
@@ -5419,7 +5461,7 @@
         const res = await fetch('/api/agent/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: query, lang: currentLang }),
+          body: JSON.stringify({ query: query, lang: currentLang, history: chatHistory }),
           signal: _agentAbortController.signal
         });
         const json = await res.json();
@@ -5427,7 +5469,8 @@
         hideTypingIndicator();
 
         if (json.success) {
-          addMessage(json.response || t('noData'), 'agent', {
+          var responseText = json.response || t('noData');
+          addMessage(responseText, 'agent', {
             mode: json.mode,
             is_table_related: json.is_table_related,
             intent: json.intent,
@@ -5435,6 +5478,10 @@
             is_compare: json.is_compare,
             compare_result: json.compare_result
           });
+          // 维护多轮上下文
+          chatHistory.push({ role: 'user', content: query });
+          chatHistory.push({ role: 'assistant', content: responseText });
+          if (chatHistory.length > 24) chatHistory = chatHistory.slice(-24);
         } else {
           addMessage(t('requestFailed'), 'agent');
         }
@@ -5581,14 +5628,14 @@
         console.error('Failed to load suggestions:', e);
       }
 
-      // Fallback to static suggestions
+      // Fallback to static search-oriented hints (no knowledge Q&A)
       let fallback;
       if (currentLang === 'de') {
-        fallback = ['Alle verfügbaren Teile auflisten', 'Was ist eine EC-Nummer?', 'Teileinfo abfragen', 'Was ist ZGS?', 'Wie vergleicht man Teile?', 'Was ist Delta?'];
+        fallback = ['Alle verfügbaren Teile auflisten', 'Teile mit EC-Nummern finden', 'Teile mit SOMA ja finden', 'Teilenummer abfragen', 'ZGS-Versionsänderungen finden', 'Zwei Teilenummern vergleichen'];
       } else if (currentLang === 'en') {
-        fallback = ['List all available parts', 'What is an EC number?', 'Query part info', 'What is ZGS?', 'How to compare parts?', 'What is Delta?'];
+        fallback = ['List all available parts', 'Find parts with EC numbers', 'Find parts where SOMA is ja', 'Query part number info', 'Find ZGS version changes', 'Compare two part numbers'];
       } else {
-        fallback = ['列出所有可用的零件', '什么是EC号？', '查询零件信息', '什么是ZGS？', '如何对比零件？', '什么是Delta？'];
+        fallback = ['列出所有可用零件', '查找有EC号的零件', '查找SOMA为ja的零件', '查询零件号信息', '查找ZGS版本变更', '对比两个零件号'];
       }
       fallback.forEach(function(text) {
         const chip = document.createElement('button');
@@ -5842,12 +5889,15 @@
     }
 
     // ==================== Search History ====================
+    // 搜索Tab与F-Brain各自独立存储历史，避免相互污染
     var HISTORY_KEY = 'parts_search_history';
+    var AGENT_HISTORY_KEY = 'fbrain_chat_history';
     var HISTORY_MAX = 10;
 
-    function getSearchHistory() {
+    function getSearchHistory(key) {
+      key = key || HISTORY_KEY;
       try {
-        var raw = localStorage.getItem(HISTORY_KEY);
+        var raw = localStorage.getItem(key);
         if (!raw) return [];
         var arr = JSON.parse(raw);
         return Array.isArray(arr) ? arr : [];
@@ -5858,21 +5908,24 @@
 
     function addSearchHistory(type, query) {
       if (!query || !query.trim()) return;
-      var history = getSearchHistory();
-      // Remove duplicates (same query + type)
+      // F-Brain(agent) 历史与零件搜索历史分离存储，避免相互污染
+      var key = (type === 'agent') ? AGENT_HISTORY_KEY : HISTORY_KEY;
+      var history = getSearchHistory(key);
+      // Remove duplicates (same query)
       history = history.filter(function(item) {
-        return !(item.query === query && item.type === type);
+        return item.query !== query;
       });
       // Add to front
       history.unshift({ type: type, query: query.trim(), timestamp: Date.now() });
       // Limit to HISTORY_MAX
       if (history.length > HISTORY_MAX) history = history.slice(0, HISTORY_MAX);
       try {
-        localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+        localStorage.setItem(key, JSON.stringify(history));
       } catch (e) {
         console.error('Failed to save history:', e);
       }
-      renderSearchHistory();
+      // 仅在对应 Tab 可见时刷新对应历史容器
+      if (type !== 'agent') renderSearchHistory();
     }
 
     function clearSearchHistory() {
@@ -5885,7 +5938,8 @@
     function renderSearchHistory() {
       var container = document.getElementById('searchHistoryContainer');
       if (!container) return;
-      var history = getSearchHistory();
+      // 搜索板块只展示零件搜索历史，不展示 F-Brain 记录
+      var history = getSearchHistory(HISTORY_KEY);
 
       var html = '<div class="search-history-header">' +
         '<span class="search-history-label">' +
@@ -5906,9 +5960,7 @@
       } else {
         html += '<div class="history-chips">';
         history.forEach(function(item, index) {
-          var icon = item.type === 'agent'
-            ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>'
-            : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>';
+          var icon = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>';
           html += '<button class="history-chip" onclick="runHistoryItem(' + index + ')">' +
             '<span class="chip-icon">' + icon + '</span>' +
             '<span class="chip-text">' + escapeHtml(item.query) + '</span>' +
@@ -5921,17 +5973,11 @@
     }
 
     function runHistoryItem(index) {
-      var history = getSearchHistory();
+      var history = getSearchHistory(HISTORY_KEY);
       var item = history[index];
       if (!item) return;
-      if (item.type === 'agent') {
-        switchTab('agent');
-        sendAgentQuery(item.query);
-      } else {
-        switchTab('search');
-        document.getElementById('searchInput').value = item.query;
-        performSearch();
-      }
+      document.getElementById('searchInput').value = item.query;
+      performSearch();
     }
 
     // ==================== Compare Result ====================

@@ -698,6 +698,28 @@ class OllamaAgent:
         with urllib.request.urlopen(req, timeout=60) as resp:
             return json.loads(resp.read()).get('response', '')
 
+    def chat(self, messages, system_prompt=None, temperature=0.3):
+        """多轮对话接口 (messages: [{role, content}])。"""
+        payload = {"model": self.model, "stream": False,
+                   "options": {"temperature": temperature}}
+        msgs = list(messages or [])
+        if system_prompt:
+            msgs.insert(0, {"role": "system", "content": system_prompt})
+        payload["messages"] = msgs
+        lb = _get_lb()
+        if lb:
+            resp_bytes, _ = lb.request('/api/chat', payload, method='POST', timeout=90, max_retries=3)
+            data = json.loads(resp_bytes.decode('utf-8'))
+            return ((data or {}).get('message') or {}).get('content', '')
+        req = urllib.request.Request(
+            f"{OLLAMA_URL}/api/chat",
+            data=json.dumps(payload).encode('utf-8'),
+            headers={'Content-Type': 'application/json'}, method='POST'
+        )
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            data = json.loads(resp.read())
+            return (data.get('message') or {}).get('content', '')
+
     def analyze_intent(self, user_query):
         lang = get_language()
         if lang == 'en':
@@ -1015,6 +1037,33 @@ class CloudAgent:
             data = json.loads(resp.read())
             return data['choices'][0]['message']['content']
 
+    def chat(self, messages, system_prompt=None, temperature=0.3):
+        """多轮对话接口 (messages: [{role, content}])。"""
+        api_url = _cloud_config.get('api_url', '').rstrip('/')
+        api_key = _cloud_config.get('api_key', '')
+        model = _cloud_config.get('model', '')
+        if not api_url or not api_key or not model:
+            raise Exception("Cloud API not configured")
+        url = f"{api_url}/chat/completions"
+        msgs = list(messages or [])
+        if system_prompt:
+            msgs.insert(0, {"role": "system", "content": system_prompt})
+        payload = json.dumps({
+            "model": model,
+            "messages": msgs,
+            "temperature": temperature,
+            "stream": False,
+        }).encode('utf-8')
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={'Content-Type': 'application/json',
+                     'Authorization': f'Bearer {api_key}'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            data = json.loads(resp.read())
+            return data['choices'][0]['message']['content']
+
     def analyze_intent(self, user_query):
         lang = get_language()
         if lang == 'en':
@@ -1122,46 +1171,301 @@ class AgentManager:
         self.use_ollama = self.ollama_agent.available
         return self.use_ollama
 
-    def process_query(self, user_query, lang='zh'):
-        # 设置当前语言
+    def process_query(self, user_query, lang='zh', history=None):
+        """处理用户查询。
+        优先由 LLM 进行语义理解 + NL2SQL；仅在无可用 LLM 时回退到规则模式。
+        history: [{'role': 'user'|'agent', 'content': str}, ...] 用于多轮上下文。
+        """
         set_language(lang)
+        history = history or []
 
-        # 1. 优先检测对比意图
+        # 1. 对比意图保留专用 UI（前端有对比结果渲染）
         compare_intent = detect_compare_intent(user_query)
         if compare_intent:
             return self._handle_compare(user_query, compare_intent)
 
-        # 2. 检测复杂条件搜索
-        complex_conditions = detect_complex_search_intent(user_query)
-        if complex_conditions:
-            return self._handle_complex_search(user_query, complex_conditions)
-
-        # 3. 获取当前活跃智能体
+        # 2. 获取活跃智能体
         active_agent, mode = self.get_active_agent()
 
-        # 4. 常规意图分析
+        # 3. 若有 LLM, 走 NL2SQL 主路径
         if mode in ('ollama', 'cloud'):
-            intent = active_agent.analyze_intent(user_query)
-            if intent is None:
-                intent = self.rule_agent.analyze_intent(user_query)
-                mode = 'rule'
-        else:
-            intent = self.rule_agent.analyze_intent(user_query)
+            try:
+                result = self._nl2sql_search(active_agent, user_query, history)
+                if result is not None:
+                    result['mode'] = mode
+                    return result
+            except Exception as e:
+                print(f"[Agent] NL2SQL failed, fallback to rule: {e}")
 
+        # 4. 回退: 规则模式（无 LLM 或 NL2SQL 异常时使用）
+        return self._rule_search(user_query)
+
+    def _rule_search(self, user_query):
+        """规则模式兜底：基于关键词/正则的搜索。"""
+        intent = self.rule_agent.analyze_intent(user_query)
         if not intent or not intent.get('is_table_related'):
             response = self.rule_agent.generate_response(user_query, None, intent)
-            return {'response': response, 'intent': intent or {'is_table_related': False},
-                    'search_results': None, 'mode': mode}
-
+            return {'response': response,
+                    'intent': intent or {'is_table_related': False},
+                    'search_results': None, 'mode': 'rule'}
         search_results = self._search_data(intent)
+        response = self.rule_agent.generate_response(user_query, search_results, intent)
+        return {'response': response, 'intent': intent,
+                'search_results': search_results, 'mode': 'rule'}
 
-        if mode in ('ollama', 'cloud'):
-            response = active_agent.generate_response(user_query, search_results, intent)
+    # ---------- NL2SQL 主流程 ----------
+
+    def _nl2sql_system_prompt(self, schema):
+        lang = get_language()
+        if lang == 'en':
+            return (
+                "You are an expert SQL generator for a vehicle parts database (SQLite dialect).\n"
+                "Given the user's question and conversation history, produce ONE read-only SQL "
+                "that answers the question.\n\n"
+                f"Database schema:\n{schema}\n\n"
+                "Rules:\n"
+                "1. Output STRICT JSON only, no markdown, no explanation.\n"
+                "2. JSON keys: is_data_query (true/false), reason, sql, sql_type.\n"
+                "   - is_data_query=false for greetings/small talk not touching the DB "
+                "(then put a direct answer in 'reason', sql='').\n"
+                "   - is_data_query=true when the answer needs DB data.\n"
+                "   - sql_type: 'rows' (list records) or 'aggregate' (COUNT/SUM/GROUP BY stats).\n"
+                "3. Use LIKE for fuzzy text matching; use exact match for known codes.\n"
+                "4. For follow-up questions (e.g. 'only those with EC', 'how many in total'), "
+                "resolve pronouns using the conversation history and generate a complete standalone SQL.\n"
+                "5. For row queries, include 'LIMIT 100' if not already present.\n"
+                "6. Never write INSERT/UPDATE/DELETE/DDL. Query only the tables listed in the schema.\n"
+                "7. Access JSON columns with json_extract(data, '$.\"Field Name\"')."
+            )
+        if lang == 'de':
+            return (
+                "Sie sind ein SQL-Experte für eine Fahrzeugteiledatenbank (SQLite-Dialekt).\n"
+                "Erzeugen Sie aus der Frage und dem Gesprächsverlauf EINE schreibgeschützte SQL-Anfrage.\n\n"
+                f"Datenbankschema:\n{schema}\n\n"
+                "Regeln:\n"
+                "1. Geben Sie AUSSCHLIESSLICH JSON aus, kein Markdown, keine Erklärung.\n"
+                "2. JSON-Schlüssel: is_data_query (true/false), reason, sql, sql_type.\n"
+                "   - is_data_query=false bei Begrüßungen/Smalltalk ohne Datenbankbezug "
+                "(dann direkte Antwort in 'reason', sql='').\n"
+                "   - is_data_query=true, wenn die Antwort Daten aus der DB benötigt.\n"
+                "   - sql_type: 'rows' (Datensätze) oder 'aggregate' (COUNT/SUM/GROUP BY-Statistik).\n"
+                "3. Verwenden Sie LIKE für unscharfe Textsuche, genauen Vergleich für bekannte Codes.\n"
+                "4. Bei Anschlussfragen lösen Sie Pronomen anhand des Verlaufs auf und erzeugen "
+                "eine vollständige, eigenständige SQL-Anfrage.\n"
+                "5. Fügen Sie bei Datensatzabfragen 'LIMIT 100' hinzu, falls nicht vorhanden.\n"
+                "6. Keine Schreiboperationen. Nur die im Schema genannten Tabellen abfragen.\n"
+                "7. JSON-Spalten mit json_extract(data, '$.\"Feldname\"') ansprechen."
+            )
+        return (
+            "你是一个车辆零件数据库的 SQL 专家（SQLite 方言）。\n"
+            "根据用户问题和对话历史，生成一条只读 SQL 来回答问题。\n\n"
+            f"数据库结构:\n{schema}\n\n"
+            "规则:\n"
+            "1. 只输出严格的 JSON，不要 markdown、不要解释。\n"
+            "2. JSON 字段: is_data_query (true/false), reason, sql, sql_type。\n"
+            "   - is_data_query=false 表示与数据库无关的问候/闲聊（把直接回答写在 reason 里，sql=''）。\n"
+            "   - is_data_query=true 表示需要查询数据库。\n"
+            "   - sql_type: 'rows'（明细记录）或 'aggregate'（COUNT/SUM/GROUP BY 统计）。\n"
+            "3. 文本模糊匹配用 LIKE；已知编号用精确匹配。\n"
+            "4. 处理追问（如“只要有EC的”“一共多少条”）时，结合历史把指代补全成完整独立 SQL。\n"
+            "5. 明细查询请加 LIMIT 100（若未指定）。\n"
+            "6. 严禁 INSERT/UPDATE/DELETE/DDL。只查询 schema 中列出的表。\n"
+            "7. JSON 字段访问使用 json_extract(data, '$.\"字段名\"')。"
+        )
+
+    def _answer_system_prompt(self, sql_type):
+        lang = get_language()
+        if lang == 'en':
+            base = ("You are a vehicle parts data assistant. Based on the user's question and the "
+                    "retrieved data, write a concise, professional answer in English. ")
+            if sql_type == 'aggregate':
+                base += "These are aggregate/statistical results; state the numbers directly."
+            else:
+                base += ("These are matching part records. Summarize the count and list at most "
+                         "5 key records (Part Number / EC / FAV / Part Name). If empty, say so.")
+            return base
+        if lang == 'de':
+            base = ("Sie sind ein Assistent für Fahrzeugteiledaten. Verfassen Sie auf Grundlage "
+                    "der Frage und der abgerufenen Daten eine knappe, professionelle Antwort auf Deutsch. ")
+            if sql_type == 'aggregate':
+                base += "Dies sind Aggregat-/Statistikergebnisse; nennen Sie die Zahlen direkt."
+            else:
+                base += ("Dies sind passende Teiledatensätze. Nennen Sie die Anzahl und maximal "
+                         "5 Schlüsseldatensätze (Teilenummer / EC / FAV / Teilbenennung). "
+                         "Falls leer, teilen Sie dies mit.")
+            return base
+        base = "你是车辆零件数据助手。根据用户问题和检索到的数据，用中文给出简洁、专业的回答。"
+        if sql_type == 'aggregate':
+            base += "这是统计结果，请直接陈述数字。"
         else:
-            response = self.rule_agent.generate_response(user_query, search_results, intent)
+            base += ("这是匹配的零件记录。请说明总条数，最多列出 5 条关键记录"
+                     "（零件号 / EC / FAV / 零件名称）；如果没有结果请如实告知。")
+        return base
 
-        return {'response': response, 'intent': intent, 'search_results': search_results,
-                'mode': mode}
+    @staticmethod
+    def _extract_json(text):
+        """从 LLM 输出中提取第一个 JSON 对象。"""
+        if not text:
+            return None
+        s = text.strip()
+        # 去除 ```json ... ``` 包裹
+        if s.startswith('```'):
+            s = re.sub(r'^```(?:json)?\s*', '', s)
+            s = re.sub(r'\s*```$', '', s)
+        try:
+            return json.loads(s)
+        except Exception:
+            pass
+        # 兜底：截取首个 { 到最后一个 }
+        m = re.search(r'\{.*\}', s, re.DOTALL)
+        if m:
+            try:
+                return json.loads(m.group(0))
+            except Exception:
+                return None
+        return None
+
+    def _nl2sql_search(self, active_agent, user_query, history):
+        """使用 LLM 进行 NL2SQL 检索 + 回答生成。失败/无关返回 None 或普通响应。"""
+        schema = db_manager.get_schema_description()
+        system_prompt = self._nl2sql_system_prompt(schema)
+
+        # 组装上下文消息（最多保留最近 6 轮，即 12 条）
+        messages = []
+        for msg in history[-12:]:
+            role = msg.get('role')
+            if role not in ('user', 'assistant', 'agent'):
+                continue
+            content = (msg.get('content') or '').strip()
+            if not content:
+                continue
+            messages.append({'role': 'assistant' if role == 'agent' else role,
+                             'content': content[:1500]})
+        messages.append({'role': 'user', 'content': user_query})
+
+        raw = active_agent.chat(messages, system_prompt=system_prompt, temperature=0.1)
+        plan = self._extract_json(raw)
+        if not isinstance(plan, dict):
+            print(f"[Agent] NL2SQL JSON parse failed: {raw[:300]}")
+            return None
+
+        is_data_query = plan.get('is_data_query')
+        sql = (plan.get('sql') or '').strip()
+        sql_type = plan.get('sql_type') or ('aggregate'
+                                            if re.search(r'\b(COUNT|SUM|AVG|MIN|MAX|GROUP\s+BY)\b',
+                                                         sql, re.IGNORECASE)
+                                            else 'rows')
+
+        # 与数据库无关的闲聊
+        if not is_data_query or not sql:
+            reason = plan.get('reason') or ''
+            if not reason:
+                reason = self.rule_agent.generate_response(
+                    user_query, None, {'is_table_related': False})
+            return {'response': reason,
+                    'intent': {'is_table_related': False,
+                               'question_type': 'chat',
+                               'nl2sql_plan': plan},
+                    'search_results': None, 'mode': None}
+
+        # 执行只读 SQL
+        results, columns, err = db_manager.execute_readonly_sql(sql)
+        if err:
+            print(f"[Agent] SQL execution failed: {err} | SQL={sql}")
+            # 把错误信息回传，让上层走 rule 兜底
+            return None
+
+        # 生成自然语言回答
+        answer = self._generate_answer(active_agent, user_query, messages,
+                                       sql, sql_type, results, columns)
+        intent = {
+            'is_table_related': True,
+            'question_type': sql_type,
+            'sql': sql,
+            'nl2sql_plan': plan,
+        }
+        return {'response': answer, 'intent': intent,
+                'search_results': results, 'mode': None}
+
+    def _generate_answer(self, active_agent, user_query, history_messages,
+                         sql, sql_type, results, columns):
+        """让 LLM 基于查询结果生成自然语言回答；失败时回退到简易文本。"""
+        # 构造结果摘要（传入 LLM）
+        if sql_type == 'aggregate':
+            summary_lines = []
+            for row in results[:20]:
+                summary_lines.append(' | '.join(f"{k}={v}" for k, v in row.items()))
+            data_summary = '\n'.join(summary_lines) if summary_lines else '(no rows)'
+        else:
+            total = len(results)
+            summary_lines = [f"(returned {total} rows, showing up to 10)"]
+            for row in results[:10]:
+                key_parts = []
+                for k in ('part_number', 'Part Number', 'BuendelNr', 'FAV_fav',
+                          'teilbenennung', 'Teilbenennung', 'SOMA in ZEUS',
+                          'Baulos_aggr', 'status'):
+                    v = row.get(k)
+                    if v not in (None, '', 'null'):
+                        key_parts.append(f"{k}={v}")
+                summary_lines.append('; '.join(key_parts[:6]) or '(empty row)')
+            data_summary = '\n'.join(summary_lines)
+
+        answer_sys = self._answer_system_prompt(sql_type)
+        answer_messages = list(history_messages[:-1])  # 不含当前 user query
+        prompt = (
+            f"User question: {user_query}\n\n"
+            f"Executed SQL: {sql}\n\n"
+            f"Query result:\n{data_summary}\n\n"
+            f"Please answer in {get_language()}."
+        )
+        answer_messages.append({'role': 'user', 'content': prompt})
+        try:
+            ans = active_agent.chat(answer_messages,
+                                    system_prompt=answer_sys, temperature=0.4).strip()
+            if ans:
+                return ans
+        except Exception as e:
+            print(f"[Agent] answer generation failed: {e}")
+
+        # 回退：本地拼一个简短回答
+        return self._fallback_answer(user_query, sql_type, results)
+
+    def _fallback_answer(self, user_query, sql_type, results):
+        lang = get_language()
+        if not results:
+            if lang == 'en':
+                return "No matching records found."
+            if lang == 'de':
+                return "Keine übereinstimmenden Datensätze gefunden."
+            return "未找到匹配的记录。"
+        total = len(results)
+        if sql_type == 'aggregate':
+            if lang == 'en':
+                return f"Statistical result ({total} row(s)): " + '; '.join(
+                    ', '.join(f"{k}={v}" for k, v in r.items()) for r in results[:5])
+            if lang == 'de':
+                return f"Statistisches Ergebnis ({total} Zeile(n)): " + '; '.join(
+                    ', '.join(f"{k}={v}" for k, v in r.items()) for r in results[:5])
+            return f"统计结果（共 {total} 行）：" + '; '.join(
+                ', '.join(f"{k}={v}" for k, v in r.items()) for r in results[:5])
+        if lang == 'en':
+            head = f"Found **{total}** matching record(s)."
+        elif lang == 'de':
+            head = f"**{total}** übereinstimmende Datensatz(e) gefunden."
+        else:
+            head = f"共找到 **{total}** 条匹配记录。"
+        lines = [head]
+        for i, row in enumerate(results[:5], 1):
+            parts = []
+            for k in ('part_number', 'Part Number', 'BuendelNr', 'FAV_fav',
+                      'teilbenennung', 'Teilbenennung'):
+                v = row.get(k)
+                if v not in (None, '', 'null'):
+                    parts.append(f"{k}={v}")
+            lines.append(f"{i}. " + (' | '.join(parts) if parts else '(record)'))
+        if total > 5:
+            lines.append('...' if lang != 'zh' else f'... 还有 {total - 5} 条')
+        return '\n'.join(lines)
 
     def _handle_compare(self, user_query, compare_intent):
         """处理对比查询"""

@@ -48,6 +48,72 @@ def _pg_sql(sql):
     return sql.replace('%', '%%').replace('?', '%s')
 
 
+# ============ NL2SQL: 只读 SQL 安全校验 & 方言转换 ============
+
+# 禁止出现的关键字 (写操作/DDL/危险函数), 用单词边界匹配
+_SQL_FORBIDDEN = re.compile(
+    r'\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|TRUNCATE|'
+    r'ATTACH|DETACH|PRAGMA|GRANT|REVOKE|EXEC|EXECUTE|VACUUM|REINDEX|'
+    r'INTO\s+TABLE|COPY|MERGE|CALL)\b',
+    re.IGNORECASE,
+)
+# 只允许出现这些语句前缀
+_SQL_ALLOWED_PREFIX = re.compile(
+    r'^\s*(SELECT|WITH|EXPLAIN)\b', re.IGNORECASE
+)
+# 危险的函数/表达式（文件读写、环境变量等）
+_SQL_DANGEROUS_FUNCS = re.compile(
+    r'\b(load_extension|readfile|writefile|pg_read_file|pg_read_binary_file|'
+    r'pg_sleep|pg_terminate_backend|shutdown|sqlite_version)\s*\(',
+    re.IGNORECASE,
+)
+# 允许查询的表白名单
+_SQL_ALLOWED_TABLES = {'parts_data', 'uploaded_files', 'unified_columns'}
+
+
+def _sqlite_to_pg(sql):
+    """将 LLM 生成的 SQLite 风格只读 SQL 轻量转换为 PostgreSQL 语法。"""
+    s = sql
+    # json_extract(data, '$."key"') / json_extract(data, '$.key') -> (data->>'key')
+    def _json_repl(m):
+        path = m.group(1)
+        key = re.sub(r'^\$\.?', '', path).strip().strip('"')
+        key = key.replace("'", "''")
+        return f"(data->>'{key}')"
+    s = re.sub(r"json_extract\s*\(\s*data\s*,\s*'([^']+)'\s*\)",
+               _json_repl, s, flags=re.IGNORECASE)
+    # CAST(... AS TEXT) 在 PG 中同样有效，无需转换
+    # || 连接符通用
+    # random() 在 PG 中也是 random()（非 SQLite 的 RANDOM()），统一小写即可
+    return s
+
+
+def validate_readonly_sql(sql):
+    """校验 LLM 生成的 SQL 是否为安全的只读查询。
+    返回 (ok: bool, error: str|None)。
+    """
+    if not sql or not sql.strip():
+        return False, "empty sql"
+    s = sql.strip().rstrip(';').strip()
+    if ';' in s:
+        # 不允许多语句
+        return False, "multiple statements not allowed"
+    if not _SQL_ALLOWED_PREFIX.match(s):
+        return False, "only SELECT/WITH allowed"
+    if _SQL_FORBIDDEN.search(s):
+        return False, "forbidden keyword"
+    if _SQL_DANGEROUS_FUNCS.search(s):
+        return False, "forbidden function"
+    if '--' in s or '/*' in s:
+        return False, "comments not allowed"
+    # 表名白名单：提取 FROM/JOIN 后的标识符
+    for m in re.finditer(r'\b(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)', s, re.IGNORECASE):
+        tname = m.group(1).lower()
+        if tname not in _SQL_ALLOWED_TABLES:
+            return False, f"table not allowed: {tname}"
+    return True, None
+
+
 class _PgRow(dict):
     """PostgreSQL 结果行, 兼容 sqlite3.Row 的访问方式 (按列名或下标)"""
 
@@ -903,6 +969,200 @@ class DatabaseManager:
         ).fetchall()
         conn.close()
         return [r['part_number'] for r in rows]
+
+    def get_search_hint_samples(self, limit_per_field=3):
+        """获取可搜索字段的样例值，用于生成搜索提示词。
+
+        返回: dict，键为业务字段英文名，值为 {"label": 显示名, "samples": [样例值...]}
+        """
+        # 可搜索的核心业务字段（英文标识名 -> 显示名）
+        searchable_fields = {
+            'part_number': 'Part Number',
+            'BuendelNr': 'EC',
+            'KEM': 'KEM',
+            'FAV_fav': 'FAV',
+            'ZGS DiaP': 'ZGS',
+            'SOMA in ZEUS': 'SOMA',
+            'Baulos_aggr': 'Stage',
+            'bndverantwortlicher': 'Responsible',
+            'status': 'Status',
+            'teilbenennung': 'Part Name',
+        }
+        conn = get_db()
+        result = {}
+        try:
+            for field_en, label in searchable_fields.items():
+                try:
+                    if field_en == 'part_number':
+                        rows = conn.execute(
+                            "SELECT DISTINCT part_number AS v FROM parts_data "
+                            "WHERE part_number != '' AND part_number IS NOT NULL "
+                            "ORDER BY RANDOM() LIMIT ?",
+                            (limit_per_field,)
+                        ).fetchall()
+                    else:
+                        field_expr = _json_field(field_en)
+                        sql = (f"SELECT DISTINCT {field_expr} AS v FROM parts_data "
+                               f"WHERE {field_expr} IS NOT NULL "
+                               f"AND CAST({field_expr} AS TEXT) != '' "
+                               f"ORDER BY RANDOM() LIMIT ?")
+                        rows = conn.execute(sql, (limit_per_field,)).fetchall()
+                    samples = [str(r['v']).strip() for r in rows
+                               if r['v'] is not None and str(r['v']).strip()]
+                    if samples:
+                        result[field_en] = {'label': label, 'samples': samples}
+                except Exception:
+                    continue
+        finally:
+            conn.close()
+        return result
+
+    def get_schema_description(self):
+        """返回供 LLM NL2SQL 使用的数据库 schema 文本描述。"""
+        conn = get_db()
+        try:
+            # 从实际数据中抽样 JSON key 及其样例值
+            sample_row = conn.execute(
+                "SELECT data FROM parts_data WHERE data IS NOT NULL LIMIT 1"
+            ).fetchone()
+            sample_keys = []
+            if sample_row and sample_row['data']:
+                try:
+                    sample_keys = list(json.loads(sample_row['data']).keys())
+                except Exception:
+                    sample_keys = []
+
+            # 常用关键字段的中文含义（辅助 LLM 理解）
+            key_hints = {
+                'BuendelNr': 'EC编号/错误号 (EC / Fehler Nr.)',
+                'KEM': 'KEM编号',
+                'FAV_fav': 'FAV编号',
+                'ZGS DiaP': 'ZGS版本号',
+                'SOMA in ZEUS': 'SOMA状态(ja/nein)',
+                'Baulos_aggr': '阶段/批次 (Stage/Baulos)',
+                'bndverantwortlicher': '负责人',
+                'status': '状态',
+                'teilbenennung': '零件名称',
+                'Teilbenennung': '零件名称',
+                'Sachnummer': '零件号（冗余在 part_number 列）',
+                'MG': '主组编号',
+                'BR': '车型系列',
+            }
+
+            lines = [
+                "表: parts_data (零件数据表)",
+                "结构化列:",
+                "  id          INTEGER  主键",
+                "  part_number TEXT     零件号 (Sachnummer)",
+                "  file_id     INTEGER  来源文件ID",
+                "  row_number  INTEGER  行号",
+                "  data        JSON/TEXT  其余业务字段，使用 json_extract 访问",
+                "",
+                "JSON data 字段访问方式: json_extract(data, '$.\"字段名\"')",
+                "示例: json_extract(data, '$.\"BuendelNr\"')",
+                "模糊匹配: CAST(json_extract(data, '$.\"BuendelNr\"') AS TEXT) LIKE '%值%'",
+                "非空判断: json_extract(data, '$.\"BuendelNr\"') IS NOT NULL",
+                "",
+                "data 中常见的字段:",
+            ]
+            shown = set()
+            for k in sample_keys[:40]:
+                hint = key_hints.get(k, '')
+                lines.append(f"  - {k}" + (f"  -- {hint}" if hint else ''))
+                shown.add(k)
+            # 补充未出现在 sample 但已知的重要字段
+            for k, hint in key_hints.items():
+                if k not in shown:
+                    lines.append(f"  - {k}  -- {hint}")
+
+            lines += [
+                "",
+                "其他可用表: uploaded_files(id, filename, original_filename, sheet_name, total_rows, upload_date, stage), unified_columns(english_name, display_name)",
+                "规则:",
+                "  1. 只生成 SELECT 语句，不要写操作",
+                "  2. 业务数据查询始终加 LIMIT，最大 100 行",
+                "  3. 计数/统计可用 COUNT(*), 不需要 LIMIT",
+                "  4. 字段名可能含空格或特殊字符，JSON 路径中用双引号包裹",
+            ]
+            return '\n'.join(lines)
+        finally:
+            conn.close()
+
+    def execute_readonly_sql(self, sql):
+        """执行 LLM 生成的只读 SQL。
+        返回 (results: list[dict], columns: list[str], error: str|None)。
+        - 自动进行安全校验
+        - 自动为无 LIMIT 的 SELECT 添加 LIMIT 100
+        - 聚合查询（含 COUNT/SUM/AVG/MIN/MAX/分组）不加 LIMIT
+        - 自动转换 SQLite JSON 语法为 PostgreSQL 语法
+        """
+        ok, err = validate_readonly_sql(sql)
+        if not ok:
+            return [], [], err
+
+        s = sql.strip().rstrip(';').strip()
+
+        # 检测是否为聚合查询（不强制加 LIMIT）
+        is_aggregate = bool(
+            re.search(r'\b(COUNT|SUM|AVG|MIN|MAX|GROUP\s+BY)\b', s, re.IGNORECASE)
+        )
+        if not is_aggregate and not re.search(r'\bLIMIT\b', s, re.IGNORECASE):
+            s += ' LIMIT 100'
+
+        if DB_TYPE == 'postgresql':
+            s = _sqlite_to_pg(s)
+
+        conn = get_db()
+        try:
+            cur = conn.execute(s)
+            rows = cur.fetchall()
+            cols = [d[0] for d in (cur.description or [])]
+            # 对于 parts_data 行，展开 JSON 为业务字段（和 search_by_field 保持一致）
+            results = []
+            is_parts_rows = ('id' in cols and 'part_number' in cols and 'data' in cols)
+            if is_parts_rows:
+                file_ids = set()
+                parsed = []
+                for row in rows:
+                    rd = dict(row)
+                    data = {}
+                    try:
+                        data = json.loads(rd.get('data') or '{}')
+                    except Exception:
+                        data = {}
+                    data['_file_id'] = rd.get('file_id')
+                    data['_row_number'] = rd.get('row_number')
+                    data['_record_id'] = rd.get('id')
+                    data.setdefault('part_number', rd.get('part_number', ''))
+                    parsed.append(data)
+                    if data['_file_id'] is not None:
+                        file_ids.add(data['_file_id'])
+                file_names = {}
+                if file_ids:
+                    placeholders = ','.join('?' * len(file_ids))
+                    fsql = (f'SELECT id, original_filename, sheet_name '
+                            f'FROM uploaded_files WHERE id IN ({placeholders})')
+                    if DB_TYPE == 'postgresql':
+                        fsql = _pg_sql(fsql)
+                    frows = conn.execute(fsql, list(file_ids)).fetchall()
+                    file_names = {r['id']: {'filename': r['original_filename'],
+                                            'sheet': r['sheet_name']} for r in frows}
+                for r in parsed:
+                    fid = r.get('_file_id')
+                    r['_source_file'] = file_names.get(fid, {}).get('filename', '')
+                    r['_source_sheet'] = file_names.get(fid, {}).get('sheet', '')
+                    results.append(r)
+                # 更新 columns 为展开后的业务字段（取首条 keys）
+                if results:
+                    cols = [k for k in results[0].keys() if not k.startswith('_source')]
+            else:
+                for row in rows:
+                    results.append({k: row[k] for k in cols})
+            return results, cols, None
+        except Exception as e:
+            return [], [], str(e)
+        finally:
+            conn.close()
 
     def update_cell(self, record_id, field_name, value):
         """更新单个单元格"""
