@@ -66,10 +66,10 @@ class LeaderElector:
                 daemon=True,
             )
             self._thread.start()
-            print(f"[Leader] 选举启用, 实例: {self._token}, TTL={self._ttl}s")
+            print(f"[Leader] election enabled, instance: {self._token}, TTL={self._ttl}s")
         else:
             self._is_leader = True  # 禁用选举时默认是 leader (单副本模式)
-            print("[Leader] 选举已禁用, 本实例默认作为 leader 运行")
+            print("[Leader] election disabled, this instance runs as leader by default")
 
     # ============== 生命周期 ==============
     def set_redis_client(self, redis_client):
@@ -83,12 +83,12 @@ class LeaderElector:
         old = self._is_leader
         self._is_leader = new_state
         if old != new_state:
-            print(f"[Leader] 状态变化: {'leader' if new_state else 'follower'}")
+            print(f"[Leader] state changed: {'leader' if new_state else 'follower'}")
             for cb in self._on_change_callbacks:
                 try:
                     cb(new_state)
                 except Exception as e:
-                    print(f"[Leader] 回调异常: {e}")
+                    print(f"[Leader] callback error: {e}")
 
     def _loop(self):
         # 给 Redis 一点时间就绪
@@ -97,7 +97,7 @@ class LeaderElector:
             try:
                 self._try_acquire_or_renew()
             except Exception as e:
-                print(f"[Leader] 选举循环异常: {e}")
+                print(f"[Leader] election loop error: {e}")
                 # Redis 故障时保守退化为 leader (避免所有实例都不跑 Delta)
                 self._fire_change(True)
             self._stop.wait(max(1, self._ttl // 3))
@@ -125,7 +125,7 @@ class LeaderElector:
                 # 其他实例是 leader
                 self._fire_change(False)
         except Exception as e:
-            print(f"[Leader] Redis 操作异常: {e}")
+            print(f"[Leader] Redis operation error: {e}")
             # 网络或 Redis 故障时，短时间内保持原状态，避免抖动
             pass
 

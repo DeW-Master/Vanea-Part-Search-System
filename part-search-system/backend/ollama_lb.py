@@ -49,7 +49,7 @@ class OllamaNode:
     def mark_success(self):
         self.consecutive_failures = 0
         if not self.healthy:
-            print(f"[Ollama-LB] 节点恢复: {self.url}")
+            print(f"[Ollama-LB] node recovered: {self.url}")
         self.healthy = True
 
     def mark_failure(self, threshold: int = OLLAMA_FAILURE_THRESHOLD):
@@ -59,9 +59,9 @@ class OllamaNode:
         if self.healthy and self.consecutive_failures >= threshold:
             self.healthy = False
             self.recovery_at = time.time() + OLLAMA_RECOVERY_BACKOFF
-            print(f"[Ollama-LB] 节点摘除: {self.url} "
-                  f"(连续失败 {self.consecutive_failures} 次, "
-                  f"恢复冷却: {OLLAMA_RECOVERY_BACKOFF}s)")
+            print(f"[Ollama-LB] node removed: {self.url} "
+                  f"(consecutive failures {self.consecutive_failures}, "
+                  f"recovery backoff: {OLLAMA_RECOVERY_BACKOFF}s)")
 
     def can_try_recover(self) -> bool:
         return (not self.healthy) and time.time() >= self.recovery_at
@@ -126,7 +126,7 @@ class OllamaLoadBalancer:
         # 启动健康检查
         self._start_health_checker()
 
-        print(f"[Ollama-LB] 初始化: 策略={self._strategy}, 节点数={len(self._nodes)}")
+        print(f"[Ollama-LB] init: strategy={self._strategy}, nodes={len(self._nodes)}")
         for n in self._nodes:
             print(f"[Ollama-LB]   - {n.url}")
 
@@ -148,7 +148,7 @@ class OllamaLoadBalancer:
             try:
                 self._check_all_nodes()
             except Exception as e:
-                print(f"[Ollama-LB] 健康检查异常: {e}")
+                print(f"[Ollama-LB] health check error: {e}")
             self._stop_event.wait(OLLAMA_HEALTHCHECK_INTERVAL)
 
     def _check_all_nodes(self):
@@ -258,7 +258,7 @@ class OllamaLoadBalancer:
                 node.mark_failure()
                 self._fire_metric('ollama_request_total', node=node, success=False)
                 last_exc = e
-                print(f"[Ollama-LB] 请求 {node.url}{path} 失败 (尝试 {attempt+1}/{max_retries}): {e}")
+                print(f"[Ollama-LB] request {node.url}{path} failed (attempt {attempt+1}/{max_retries}): {e}")
             finally:
                 node.active_requests = max(0, node.active_requests - 1)
 
@@ -319,8 +319,8 @@ class OllamaLoadBalancer:
                 self._fire_metric('ollama_request_total', node=node, success=False)
                 node.active_requests = max(0, node.active_requests - 1)
                 last_exc = e
-                print(f"[Ollama-LB] 流式请求 {node.url}{path} 失败 "
-                      f"(尝试 {attempt+1}/{max_retries}): {e}")
+                print(f"[Ollama-LB] streaming request {node.url}{path} failed "
+                      f"(attempt {attempt+1}/{max_retries}): {e}")
                 # 非流式已建立才不重试，这里是建连阶段，可以继续重试
                 continue
 
@@ -338,7 +338,7 @@ class OllamaLoadBalancer:
             try:
                 cb(**kwargs)
             except Exception as e:
-                print(f"[Ollama-LB] metric 回调异常 {name}: {e}")
+                print(f"[Ollama-LB] metric callback error {name}: {e}")
 
 
 # 全局单例

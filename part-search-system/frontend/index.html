@@ -3685,6 +3685,8 @@
     var _deltaCurrent = 2;       // Default: Delta2 (TO1→TO2)
     var _deltaInited = false;
     var _deltaCharts = {};       // ECharts instances
+    var _deltaPollTimer = null;  // 定时轮询定时器
+    var _deltaPollInterval = 30000; // 轮询间隔 30s
     var _deltaFilterLevel = null; // Current drill-down filter level: null(all), ec, zeus, soma, noec, nozeus
     var _deltaFilterSide = null;  // Which delta side the filter applies to: 1 or 2
 
@@ -4572,7 +4574,42 @@
           updatePieCharts(_deltaCurrent);
 
           _deltaInited = true;
+          // 首次初始化完成后启动定时轮询
+          startDeltaPolling();
         });
+    }
+
+    // 拉取最新 Delta 数据并重绘图表（轮询用，图表实例已存在）
+    function refreshDeltaDashboardData() {
+      if (!_deltaInited) return;
+      fetch('/api/delta/dashboard')
+        .then(function(res) { return res.json(); })
+        .then(function(json) {
+          if (json && json.success && json.data) {
+            _deltaApiData = json.data;
+            renderDeltaTreeSVG();
+            renderDeltaEcPie();
+            renderDeltaZeusPie();
+            renderDeltaBarLine();
+            updateKpiCards(_deltaCurrent);
+            updatePieCharts(_deltaCurrent);
+          }
+        })
+        .catch(function(err) {
+          console.warn('Delta dashboard refresh failed:', err);
+        });
+    }
+
+    // 启动定时轮询：仅在仪表盘所在的 home 标签可见时刷新
+    function startDeltaPolling() {
+      if (_deltaPollTimer) return;
+      _deltaPollTimer = setInterval(function() {
+        var homeActive = document.getElementById('homeTab') &&
+                         document.getElementById('homeTab').classList.contains('active');
+        if (homeActive) {
+          refreshDeltaDashboardData();
+        }
+      }, _deltaPollInterval);
     }
 
     function switchDelta(deltaNum) {

@@ -810,7 +810,7 @@ class DatabaseManager:
         # 导入后清理：检测并删除全空列
         removed_cols = self._remove_empty_columns()
         if removed_cols:
-            print(f"[DB] 导入后清理：已删除 {len(removed_cols)} 个全空列: {removed_cols}")
+            print(f"[DB] post-import cleanup: removed {len(removed_cols)} all-empty column(s): {removed_cols}")
 
         return results
 
@@ -1658,7 +1658,7 @@ class DatabaseManager:
             try:
                 field_expr = _json_field(field)
             except ValueError:
-                print(f"[DB] 忽略非法字段名: {field!r}")
+                print(f"[DB] ignoring invalid field name: {field!r}")
                 continue
 
             if operator == 'eq':
@@ -1709,6 +1709,142 @@ class DatabaseManager:
 
     # ==================== Delta 计算 ====================
 
+    # ---- 阶段数据来源辅助 (按 uploaded_files.stage 归类) ----
+    def _get_stage_file_ids(self, conn, stage):
+        """获取某阶段 (pre-TO/TO1/TO2) 所有 active BOM 文件的 file_id 列表。
+        阶段归属权威来源: 上传时用户在 uploaded_files.stage 字段指定的标签。
+        只取 file_type='BOM' 的文件 (supplementary ENIGMA 主表不参与阶段归类)。
+        """
+        rows = conn.execute(
+            "SELECT id FROM uploaded_files "
+            "WHERE file_type = 'BOM' AND stage = ? AND status = 'active' "
+            "ORDER BY id",
+            [stage]
+        ).fetchall()
+        return [r['id'] for r in rows]
+
+    def _load_enigma_enrichment(self, conn):
+        """加载 supplementary (ENIGMA 主表) 数据, 按 part_number 索引做富化。
+        同一 PN 出现多次时, 后导入 (id 更大) 的覆盖。
+        """
+        rows = conn.execute(
+            "SELECT part_number, data FROM parts_data pd "
+            "JOIN uploaded_files uf ON uf.id = pd.file_id "
+            "WHERE uf.file_type = 'supplementary' AND uf.status = 'active' "
+            "ORDER BY pd.id"
+        ).fetchall()
+        out = {}
+        for r in rows:
+            pn = r['part_number']
+            if not pn:
+                continue
+            try:
+                d = json.loads(r['data'])
+            except Exception:
+                continue
+            if pn in out:
+                # 合并: 新数据填空字段 (优先使用新值, 但保留旧值中非空且新值为空的字段)
+                merged = dict(out[pn])
+                for k, v in d.items():
+                    if v not in (None, ''):
+                        merged[k] = v
+                out[pn] = merged
+            else:
+                out[pn] = d
+        return out
+
+    def _load_enigma_value_index(self, conn):
+        """加载 supplementary (ENIGMA 主表) 中每个 PN 的 EC/KEM/FAV 全部取值集合。
+
+        与 _load_enigma_enrichment (同 PN 合并为单条) 不同, 这里按 PN 收集
+        所有行的非空取值 —— 同一 PN 在 ENIGMA 可能有多行, 对应多个 EC (Bundle Number)。
+
+        返回: {pn: {'ec': set(), 'kem': set(), 'fav': set()}}
+        """
+        from config import DELTA_BUSINESS_FIELDS
+        ec_col = DELTA_BUSINESS_FIELDS['ec']    # Bundle Number
+        kem_col = DELTA_BUSINESS_FIELDS['kem']  # KEM Number
+        fav_col = DELTA_BUSINESS_FIELDS['fav']  # FAV
+        rows = conn.execute(
+            "SELECT part_number, data FROM parts_data pd "
+            "JOIN uploaded_files uf ON uf.id = pd.file_id "
+            "WHERE uf.file_type = 'supplementary' AND uf.status = 'active' "
+            "ORDER BY pd.id"
+        ).fetchall()
+        idx = {}
+        for r in rows:
+            pn = r['part_number']
+            if not pn:
+                continue
+            try:
+                d = json.loads(r['data'])
+            except Exception:
+                continue
+            entry = idx.setdefault(pn, {'ec': set(), 'kem': set(), 'fav': set()})
+            for key, col in (('ec', ec_col), ('kem', kem_col), ('fav', fav_col)):
+                v = str(d.get(col, '')).strip()
+                if v:
+                    entry[key].add(v)
+        return idx
+
+    def _build_stage_pn_map(self, conn, stage, part_number=None):
+        """获取某阶段所有 PN 的 map (key=pn, value={zgs, data, id, file_id})。
+
+        数据源: 该阶段 BOM 文件 (file_type='BOM' AND stage=stage) 的 parts_data 行,
+        可选地用 ENIGMA 主表 (supplementary) 按 PN 富化业务字段 (EC/FAV/KEM/状态等)。
+        同 PN 多条记录时只保留第一条 (按 id 升序)。
+
+        参数:
+            conn: 数据库连接
+            stage: 阶段名 (pre-TO/TO1/TO2)
+            part_number: 可选的 PN 过滤 (模糊匹配)
+
+        返回:
+            {pn: {id, file_id, zgs, data}} 的字典 (data 已含 ENIGMA 富化)
+        """
+        from config import DELTA_BUSINESS_FIELDS
+        file_ids = self._get_stage_file_ids(conn, stage)
+        if not file_ids:
+            return {}
+
+        enigma_map = self._load_enigma_enrichment(conn)
+
+        # 一次拉取该阶段所有 BOM 行
+        ph = ",".join(["?"] * len(file_ids))
+        sql = (
+            f"SELECT id, file_id, part_number, data FROM parts_data "
+            f"WHERE file_id IN ({ph})"
+        )
+        params = list(file_ids)
+        if part_number:
+            sql += " AND part_number LIKE ?"
+            params.append(f'%{part_number}%')
+        sql += " ORDER BY id"
+        rows = conn.execute(sql, params).fetchall()
+
+        zgs_col = DELTA_BUSINESS_FIELDS["zgs"]  # "ZGS"
+        pn_map = {}
+        for r in rows:
+            pn = r['part_number']
+            if not pn or pn in pn_map:
+                continue
+            try:
+                d = json.loads(r['data'])
+            except Exception:
+                d = {}
+            # 富化: BOM 数据优先 (zgs/part number 来自 BOM), ENIGMA 填空业务字段
+            enr = enigma_map.get(pn, {})
+            for k, v in enr.items():
+                if d.get(k) in (None, ''):
+                    d[k] = v
+            pn_map[pn] = {
+                'id': r['id'],
+                'file_id': r['file_id'],
+                'zgs': str(d.get(zgs_col, '')).strip(),
+                'data': d,
+            }
+        return pn_map
+
     def calculate_delta(self, from_stage="pre-TO", to_stage="TO1",
                          change_filter=None, part_number=None, page=1, page_size=50):
         """计算两个阶段间的 Delta (PN+ZGS组合对比)。
@@ -1726,16 +1862,13 @@ class DatabaseManager:
         - EC检测：检查后阶段PN在ENIGMA记录中是否存在EC(BuendelNr)
         - ZEUS/FAV：有EC的PN需验证ZEUS(FAV)信息是否已更新
         """
-        from config import DELTA_FIELD_CONFIG, DELTA_STAGE_FIELD
+        from config import DELTA_FIELD_CONFIG, DELTA_BUSINESS_FIELDS
         conn = get_db()
         col_names = [r['english_name'] for r in conn.execute(
             'SELECT english_name FROM unified_columns').fetchall()]
 
-        # 1. 确定阶段标识字段存在
-        stage_field = DELTA_STAGE_FIELD
-        if stage_field not in col_names:
-            conn.close()
-            return {"success": False, "error": f"Stage field '{stage_field}' not found"}
+        ec_col = DELTA_BUSINESS_FIELDS['ec']    # Bundle Number
+        fav_col = DELTA_BUSINESS_FIELDS['fav']  # FAV
 
         # 2-4. 构建两阶段的PN map（复用 _build_stage_pn_map）
         from_map = self._build_stage_pn_map(conn, from_stage, part_number)
@@ -1759,11 +1892,11 @@ class DatabaseManager:
                 pair['match_type'], DELTA_FIELD_CONFIG, col_names)
             # EC 检测：检查后阶段 PN 在 ENIGMA 记录中是否存在 EC
             to_data = pair['to_info']['data'] if pair['to_info'] else {}
-            ec_value = str(to_data.get('BuendelNr', '')).strip()
+            ec_value = str(to_data.get(ec_col, '')).strip()
             delta['has_ec'] = bool(ec_value)
             delta['ec_value'] = ec_value
             # ZEUS/FAV 信息更新验证：有EC的PN需验证FAV(ZEUS ID)是否已填写
-            fav_value = str(to_data.get('FAV_fav', '')).strip()
+            fav_value = str(to_data.get(fav_col, '')).strip()
             delta['has_zeus'] = bool(fav_value)
             delta['zeus_updated'] = bool(ec_value and fav_value)
             delta['fav_value'] = fav_value
@@ -1853,23 +1986,6 @@ class DatabaseManager:
             "record_id_new": to_info['id'] if to_info else None,
         }
 
-    def _match_stage(self, baulos_val):
-        """根据Baulos_aggr字段值匹配阶段名称。"""
-        from config import DELTA_STAGE_PATTERNS
-        val = str(baulos_val or '').upper()
-        for stage_name, pattern in DELTA_STAGE_PATTERNS.items():
-            if pattern is None:
-                # pre-TO: 既不含PRO1也不含PRO2
-                if 'PRO1' not in val and 'PRO2' not in val:
-                    return stage_name
-            else:
-                # SQL LIKE %xxx% 转 Python in 操作
-                keyword = pattern.replace('%', '')
-                if keyword in val:
-                    return stage_name
-        # 默认归为pre-TO
-        return 'pre-TO'
-
     def get_delta_detail(self, part_number, from_stage=None, to_stage=None):
         """获取Delta详情（下钻数据）：两阶段并排对比，高亮差异字段。
 
@@ -1881,12 +1997,14 @@ class DatabaseManager:
         返回:
             两阶段数据对比，标记差异字段
         """
-        from config import DELTA_FIELD_CONFIG, DELTA_STAGE_PATTERNS, DELTA_STAGE_FIELD
+        from config import DELTA_FIELD_CONFIG
 
         conn = get_db()
         rows = conn.execute(
-            "SELECT id, file_id, part_number, data FROM parts_data "
-            "WHERE part_number = ? ORDER BY id",
+            "SELECT pd.id, pd.file_id, pd.part_number, pd.data, uf.stage, uf.file_type "
+            "FROM parts_data pd "
+            "JOIN uploaded_files uf ON uf.id = pd.file_id "
+            "WHERE pd.part_number = ? ORDER BY pd.id",
             [part_number]
         ).fetchall()
         all_cols = [r['english_name'] for r in conn.execute(
@@ -1896,12 +2014,13 @@ class DatabaseManager:
         if not rows:
             return {"error": "Part not found"}
 
-        # 按阶段分组
+        # 按阶段分组 (BOM 文件才有 stage; supplementary 行归入对应 file_id 的 stage=None)
         stage_data = {}  # stage_name -> {file_id, data}
         for r in rows:
             data = json.loads(r['data'])
-            baulos_val = data.get(DELTA_STAGE_FIELD, '')
-            matched_stage = self._match_stage(baulos_val)
+            matched_stage = r['stage'] if r['stage'] else None
+            if not matched_stage:
+                continue
             # 同一阶段只保留一条（取最新的）
             stage_data[matched_stage] = {
                 'file_id': r['file_id'],
@@ -1989,52 +2108,6 @@ class DatabaseManager:
             ],
         }
 
-    def _get_stage_where_clause(self, stage):
-        """构建阶段查询的WHERE子句。"""
-        from config import DELTA_STAGE_FIELD, DELTA_STAGE_PATTERNS
-        stage_field = DELTA_STAGE_FIELD
-        pattern = DELTA_STAGE_PATTERNS.get(stage)
-        if pattern is None:
-            return (f"(UPPER({_json_field(stage_field)}) NOT LIKE '%PRO1%' "
-                    f"AND UPPER({_json_field(stage_field)}) NOT LIKE '%PRO2%')")
-        else:
-            return f"UPPER({_json_field(stage_field)}) LIKE '{pattern}'"
-
-    def _build_stage_pn_map(self, conn, stage, part_number=None):
-        """获取某阶段所有PN的map（key=pn, value={zgs, data, id}）。
-
-        复用 calculate_delta 中第3-4步的逻辑。
-        同PN多条记录时只保留第一条（按id排序）。
-
-        参数:
-            conn: 数据库连接
-            stage: 阶段名 (pre-TO/TO1/TO2)
-            part_number: 可选的PN过滤（模糊匹配）
-
-        返回:
-            {pn: {id, zgs, data}} 的字典
-        """
-        clause = self._get_stage_where_clause(stage)
-        pn_filter = ""
-        pn_params = []
-        if part_number:
-            pn_filter = " AND part_number LIKE ?"
-            pn_params = [f'%{part_number}%']
-
-        rows = conn.execute(
-            f"SELECT id, part_number, data FROM parts_data "
-            f"WHERE {clause}{pn_filter} ORDER BY id", pn_params
-        ).fetchall()
-
-        pn_map = {}
-        for r in rows:
-            pn = r['part_number']
-            if pn and pn not in pn_map:
-                data = json.loads(r['data'])
-                zgs = str(data.get('ZGS DiaP', '')).strip()
-                pn_map[pn] = {'id': r['id'], 'zgs': zgs, 'data': data}
-        return pn_map
-
     def _compute_delta_pairs(self, from_map, to_map):
         """PN+ZGS 组合对比，返回 delta pairs 列表。
 
@@ -2088,25 +2161,31 @@ class DatabaseManager:
 
         return deltas
 
-    def _compute_kpi_from_delta_pairs(self, delta_pairs):
+    def _compute_kpi_from_delta_pairs(self, delta_pairs, enigma_index=None):
         """从 delta pairs 计算 Dashboard KPI 数据。
 
-        基于PN+ZGS组合匹配的结果，计算各项KPI指标。
-        EC检测规则：检查后阶段PN在ENIGMA记录中是否存在EC(BuendelNr)，
-        存在即为EC变更（不仅限于EC从无到有的转换）。
-        ZEUS/FAV验证：有EC的PN需验证FAV(ZEUS ID)信息是否已更新。
+        新 PN / 新 EC 逻辑 (按用户定义):
+        - D1 = 仅存在于后阶段的 PN 集合 (match_type == 'new_part'), new_pn = D1.size
+        - 对 D1 中每个 PN 查 ENIGMA 主表: PN 在 ENIGMA 存在且能找到 EC (Bundle Number),
+          则把该 PN 的全部 EC 值加入 EC 集合; new_ec = EC 集合大小 (distinct Bundle Number)
+        - new_kem: D1 中有 EC 的 PN 的 KEM 取值集合大小 (KEM 是 EC 的子集)
+        - ec_with_zeus: D1 中有 EC 且 FAV (ZEUS ID) 已填写的 PN 数
 
         参数:
             delta_pairs: _compute_delta_pairs 返回的列表
+            enigma_index: _load_enigma_value_index 返回的 {pn: {'ec','kem','fav'}} 索引
 
         返回:
             {new_pn, discontinued_pn, zgs_changed, total_delta, new_ec, new_kem, soma_ja, ec_with_zeus}
         """
+        if enigma_index is None:
+            enigma_index = {}
+
         new_pn = 0
         discontinued_pn = 0
         zgs_changed = 0
-        new_ec = 0
-        new_kem = 0
+        new_ec_set = set()
+        new_kem_set = set()
         soma_ja = 0
         ec_with_zeus = 0
 
@@ -2117,6 +2196,13 @@ class DatabaseManager:
 
             if match_type == 'new_part':
                 new_pn += 1
+                # 新 PN 查 ENIGMA: PN 存在且 find EC == true, 则 EC.add(PN.EC)
+                enr = enigma_index.get(pair['part_number'])
+                if enr and enr['ec']:
+                    new_ec_set.update(enr['ec'])
+                    new_kem_set.update(enr['kem'])
+                    if enr['fav']:
+                        ec_with_zeus += 1
             elif match_type == 'discontinued_part':
                 discontinued_pn += 1
             elif match_type == 'zgs_upgraded':
@@ -2125,26 +2211,7 @@ class DatabaseManager:
             from_data = from_info['data'] if from_info else {}
             to_data = to_info['data'] if to_info else {}
 
-            # EC检测：后阶段PN在ENIGMA记录中存在EC(BuendelNr)即为EC变更
-            to_ec = str(to_data.get('BuendelNr', '')).strip() if to_data else ''
-            from_ec = str(from_data.get('BuendelNr', '')).strip() if from_data else ''
-            has_ec = bool(to_ec)
-            ec_added = not from_ec and to_ec
-            if has_ec:
-                new_ec += 1
-
-            # KEM从无到有（基于EC新增的KEM释放，KEM是EC的子集）
-            from_kem = str(from_data.get('KEM Number', '')).strip() if from_data else ''
-            to_kem = str(to_data.get('KEM Number', '')).strip() if to_data else ''
-            if ec_added and not from_kem and to_kem:
-                new_kem += 1
-
-            # ZEUS/FAV信息更新验证：有EC的PN需验证FAV(ZEUS ID)是否已填写
-            to_fav = str(to_data.get('FAV_fav', '')).strip() if to_data else ''
-            if has_ec and to_fav:
-                ec_with_zeus += 1
-
-            # SOMA in ZEUS 从无到有 / 从'nein'变为'ja'
+            # SOMA in ZEUS 从无到有 / 从'nein'变为'ja' (若数据含该字段)
             from_soma = str(from_data.get('SOMA in ZEUS', '')).strip().lower() if from_data else ''
             to_soma = str(to_data.get('SOMA in ZEUS', '')).strip().lower() if to_data else ''
             if from_soma != 'ja' and to_soma == 'ja':
@@ -2155,8 +2222,8 @@ class DatabaseManager:
             'discontinued_pn': discontinued_pn,
             'zgs_changed': zgs_changed,
             'total_delta': len(delta_pairs),
-            'new_ec': new_ec,
-            'new_kem': new_kem,
+            'new_ec': len(new_ec_set),
+            'new_kem': len(new_kem_set),
             'soma_ja': soma_ja,
             'ec_with_zeus': ec_with_zeus,
         }
@@ -2164,140 +2231,94 @@ class DatabaseManager:
     def get_delta_dashboard_data(self):
         """获取Delta可视化面板所需的全部数据。
 
-        返回结构:
-            - stages: 各阶段基础统计
-            - delta1 / delta2: 各Delta区间的KPI和饼图数据
-            - bar_line: 柱状折线图数据
+        阶段归属统一走 uploaded_files.stage (BOM 文件), EC/FAV/KEM 等业务字段
+        来自 supplementary (ENIGMA 主表) 按 PN 富化。
         """
-        from config import DELTA_STAGE_PATTERNS, DELTA_STAGE_FIELD
+        from config import DELTA_BUSINESS_FIELDS
         conn = get_db()
 
-        stage_field = DELTA_STAGE_FIELD
-        stages = ['pre-TO', 'TO1', 'TO2']
-
-        # 字段名（与数据库列对应）
-        ec_col = 'BuendelNr'
-        fav_col = 'FAV_fav'
-        fav_status_col = 'FAVStatusKurz_fav'
+        ec_col = DELTA_BUSINESS_FIELDS['ec']           # Bundle Number
+        fav_col = DELTA_BUSINESS_FIELDS['fav']         # FAV
+        fav_status_col = DELTA_BUSINESS_FIELDS['fav_status']  # FAV Status Short
         soma_col = 'SOMA in ZEUS'
-        kem_col = 'KEM Number'
-        zgs_col = 'ZGS DiaP'
-        ec_status_col = 'Process Status'
+        kem_col = DELTA_BUSINESS_FIELDS['kem']         # KEM Number
+        ec_status_col = DELTA_BUSINESS_FIELDS['ec_status']  # ProzessStatusDetail
 
-        # === 1. 各阶段基础统计 ===
-        stage_stats = {}
-        for stage in stages:
-            clause = self._get_stage_where_clause(stage)
-            total = conn.execute(f"SELECT COUNT(*) as c FROM parts_data WHERE {clause}").fetchone()['c']
-            pn_count = conn.execute(
-                f"SELECT COUNT(DISTINCT part_number) as c FROM parts_data "
-                f"WHERE part_number != '' AND {clause}"
-            ).fetchone()['c']
+        # === 1. 各阶段 PN map (含 ENIGMA 富化) ===
+        stage_maps = {
+            'pre-TO': self._build_stage_pn_map(conn, 'pre-TO'),
+            'TO1': self._build_stage_pn_map(conn, 'TO1'),
+            'TO2': self._build_stage_pn_map(conn, 'TO2'),
+        }
 
-            # EC统计
-            ec_count = conn.execute(
-                f"SELECT COUNT(DISTINCT {_json_field(ec_col)}) as c FROM parts_data "
-                f"WHERE {_json_field(ec_col)} IS NOT NULL "
-                f"AND {_json_field(ec_col)} != '' AND {clause}"
-            ).fetchone()['c']
-            ec_pn = conn.execute(
-                f"SELECT COUNT(DISTINCT part_number) as c FROM parts_data "
-                f"WHERE part_number != '' AND {_json_field(ec_col)} IS NOT NULL "
-                f"AND {_json_field(ec_col)} != '' AND {clause}"
-            ).fetchone()['c']
-
-            # FAV/ZEUS统计
-            fav_count = conn.execute(
-                f"SELECT COUNT(DISTINCT {_json_field(fav_col)}) as c FROM parts_data "
-                f"WHERE {_json_field(fav_col)} IS NOT NULL "
-                f"AND {_json_field(fav_col)} != '' AND {clause}"
-            ).fetchone()['c']
-            fav_pn = conn.execute(
-                f"SELECT COUNT(DISTINCT part_number) as c FROM parts_data "
-                f"WHERE part_number != '' AND {_json_field(fav_col)} IS NOT NULL "
-                f"AND {_json_field(fav_col)} != '' AND {clause}"
-            ).fetchone()['c']
-
-            # KEM统计
-            kem_count = conn.execute(
-                f"SELECT COUNT(DISTINCT {_json_field(kem_col)}) as c FROM parts_data "
-                f"WHERE {_json_field(kem_col)} IS NOT NULL "
-                f"AND {_json_field(kem_col)} != '' AND {clause}"
-            ).fetchone()['c']
-
-            # SOMA=Ja统计
-            soma_ja = conn.execute(
-                f"SELECT COUNT(*) as c FROM parts_data "
-                f"WHERE LOWER({_json_field(soma_col)}) = 'ja' AND {clause}"
-            ).fetchone()['c']
-
-            stage_stats[stage] = {
+        def _stage_stats(pn_map):
+            total = len(pn_map)
+            pn_count = total
+            ec_set = set()
+            ec_pn_set = set()
+            fav_set = set()
+            fav_pn_set = set()
+            kem_set = set()
+            soma_ja = 0
+            for pn, info in pn_map.items():
+                d = info['data']
+                ec_v = str(d.get(ec_col, '')).strip()
+                if ec_v:
+                    ec_set.add(ec_v)
+                    ec_pn_set.add(pn)
+                fav_v = str(d.get(fav_col, '')).strip()
+                if fav_v:
+                    fav_set.add(fav_v)
+                    fav_pn_set.add(pn)
+                kem_v = str(d.get(kem_col, '')).strip()
+                if kem_v:
+                    kem_set.add(kem_v)
+                if str(d.get(soma_col, '')).strip().lower() == 'ja':
+                    soma_ja += 1
+            return {
                 'total_records': total,
                 'unique_pn': pn_count,
-                'ec_count': ec_count,
-                'ec_pn': ec_pn,
-                'fav_count': fav_count,
-                'fav_pn': fav_pn,
-                'kem_count': kem_count,
+                'ec_count': len(ec_set),
+                'ec_pn': len(ec_pn_set),
+                'fav_count': len(fav_set),
+                'fav_pn': len(fav_pn_set),
+                'kem_count': len(kem_set),
                 'soma_ja': soma_ja,
             }
 
-        # === 2. Delta KPI 计算（两阶段对比，基于PN+ZGS组合匹配算法） ===
-        # 使用与 calculate_delta 完全一致的 PN+ZGS 组合匹配逻辑
-        pre_to_map = self._build_stage_pn_map(conn, 'pre-TO')
-        to1_map = self._build_stage_pn_map(conn, 'TO1')
-        to2_map = self._build_stage_pn_map(conn, 'TO2')
+        stage_stats = {s: _stage_stats(m) for s, m in stage_maps.items()}
 
-        delta1_pairs = self._compute_delta_pairs(pre_to_map, to1_map)
-        delta2_pairs = self._compute_delta_pairs(to1_map, to2_map)
-
-        delta1_kpi_full = self._compute_kpi_from_delta_pairs(delta1_pairs)
-        delta2_kpi_full = self._compute_kpi_from_delta_pairs(delta2_pairs)
-
-        # 保持返回字段与前端一致（去掉total_delta，与原有结构对齐）
+        # === 2. Delta KPI (PN+ZGS 组合匹配) ===
+        delta1_pairs = self._compute_delta_pairs(stage_maps['pre-TO'], stage_maps['TO1'])
+        delta2_pairs = self._compute_delta_pairs(stage_maps['TO1'], stage_maps['TO2'])
+        enigma_index = self._load_enigma_value_index(conn)
+        delta1_kpi_full = self._compute_kpi_from_delta_pairs(delta1_pairs, enigma_index)
+        delta2_kpi_full = self._compute_kpi_from_delta_pairs(delta2_pairs, enigma_index)
         delta1_kpi = {k: v for k, v in delta1_kpi_full.items() if k != 'total_delta'}
         delta2_kpi = {k: v for k, v in delta2_kpi_full.items() if k != 'total_delta'}
+        valid = all(stage_maps[s] for s in ('pre-TO', 'TO1', 'TO2'))
 
-        # Delta 数据校验：确保两阶段数据均非空
-        valid = bool(pre_to_map) and bool(to1_map) and bool(to2_map)
+        # === 3. EC 状态分布 (饼图) ===
+        def _status_distribution(pn_map, col):
+            cnt = {}
+            for _, info in pn_map.items():
+                v = str(info['data'].get(col, '')).strip()
+                if v:
+                    cnt[v] = cnt.get(v, 0) + 1
+            items = sorted(cnt.items(), key=lambda x: x[1], reverse=True)
+            return [{'name': n, 'value': c} for n, c in items]
 
-        # === 3. EC Process Status 饼图数据 ===
-        def get_ec_status_distribution(stage):
-            clause = self._get_stage_where_clause(stage)
-            rows = conn.execute(
-                f"SELECT {_json_field(ec_status_col)} as val, COUNT(*) as c "
-                f"FROM parts_data "
-                f"WHERE {_json_field(ec_status_col)} IS NOT NULL "
-                f"AND {_json_field(ec_status_col)} != '' "
-                f"AND {clause} GROUP BY {_json_field(ec_status_col)} "
-                f"ORDER BY c DESC"
-            ).fetchall()
-            return [{'name': r['val'], 'value': r['c']} for r in rows if r['val']]
+        ec_pie_to1 = _status_distribution(stage_maps['TO1'], ec_status_col)
+        ec_pie_to2 = _status_distribution(stage_maps['TO2'], ec_status_col)
+        fav_pie_to1 = _status_distribution(stage_maps['TO1'], fav_status_col)
+        fav_pie_to2 = _status_distribution(stage_maps['TO2'], fav_status_col)
 
-        ec_pie_to1 = get_ec_status_distribution('TO1')
-        ec_pie_to2 = get_ec_status_distribution('TO2')
-
-        # === 4. FAV Status 饼图数据 ===
-        def get_fav_status_distribution(stage):
-            clause = self._get_stage_where_clause(stage)
-            rows = conn.execute(
-                f"SELECT {_json_field(fav_status_col)} as val, COUNT(*) as c "
-                f"FROM parts_data "
-                f"WHERE {_json_field(fav_status_col)} IS NOT NULL "
-                f"AND {_json_field(fav_status_col)} != '' "
-                f"AND {clause} GROUP BY {_json_field(fav_status_col)} "
-                f"ORDER BY c DESC"
-            ).fetchall()
-            return [{'name': r['val'], 'value': r['c']} for r in rows if r['val']]
-
-        fav_pie_to1 = get_fav_status_distribution('TO1')
-        fav_pie_to2 = get_fav_status_distribution('TO2')
-
-        # === 5. 柱状折线图数据 ===
+        # === 4. 柱状折线图数据 ===
+        stages_order = ['pre-TO', 'TO1', 'TO2']
         bar_line = {
-            'stages': stages,
-            'ec_counts': [stage_stats[s]['ec_pn'] for s in stages],
-            'fav_counts': [stage_stats[s]['fav_pn'] for s in stages],
+            'stages': stages_order,
+            'ec_counts': [stage_stats[s]['ec_pn'] for s in stages_order],
+            'fav_counts': [stage_stats[s]['fav_pn'] for s in stages_order],
         }
 
         conn.close()

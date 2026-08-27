@@ -10,11 +10,11 @@
 ## 构建状态
 
 - **应用版本**: `build20260817`
-- **Git 分支**: `DB-Optimized`
-- **最新提交**: [`ed3024c`](https://github.com/DeW-Master/Vanea-Part-Search-System/commit/ed3024c54d72f5556610691e63cc78578ee77982)
-- **提交说明**: build: 新增git hook自动更新README构建状态，优化前端分页与智能问答
-- **提交时间**: 2026-08-21T10:02:15+08:00
-- **工作区状态**: 存在未提交改动
+- **Git 分支**: `main`
+- **最新提交**: [`8db9f4f`](https://github.com/DeW-Master/Vanea-Part-Search-System/commit/8db9f4f8bb53049d8e8f049f62ba1a653b9492ce)
+- **提交说明**: chore: 项目文件整理 + 会话 idle 回收 + Ollama 负载测试脚本
+- **提交时间**: 2026-08-21T10:59:26+08:00
+- **工作区状态**: 干净（已全部提交）
 
 > 本区块在每次 `git push` 前通过 pre-push 钩子按当前提交自动刷新。
 <!-- BUILD_STATUS_END -->

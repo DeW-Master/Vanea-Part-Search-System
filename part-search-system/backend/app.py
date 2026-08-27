@@ -22,8 +22,54 @@ import threading
 import uuid
 from datetime import datetime, timedelta
 from collections import deque
+import sys as _sys
 from flask import Flask, request, jsonify, session, send_from_directory, Response, stream_with_context
 from flask_cors import CORS
+
+# Windows GBK 控制台兜底：强制 stdout/stderr 使用 UTF-8，避免 emoji(✅⚠️) 触发 UnicodeEncodeError 崩溃
+for _stream in (_sys.stdout, _sys.stderr):
+    try:
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
+# PowerShell 会把写到 stderr 的内容显示为红色错误。Flask 开发服务器的
+# "WARNING: This is a development server..." 横幅写在 stderr，导致每次启动一片红。
+# 这里过滤掉该提示横幅；其余 stderr（真实 traceback 等）转发到 stdout，避免误报红色。
+class _StderrFilter:
+    _SUPPRESS = ("WARNING: This is a development server",
+                 "WARNING: Do not use the development server",
+                 "Use a production WSGI server")
+
+    def __init__(self, real_stderr, stdout):
+        self._real = real_stderr
+        self._stdout = stdout
+
+    def write(self, text):
+        try:
+            if text and any(marker in text for marker in self._SUPPRESS):
+                return 0
+            # 非抑制内容（如真实异常 traceback）转发到 stdout，避免 PowerShell 红色显示
+            return self._stdout.write(text)
+        except Exception:
+            return 0
+
+    def flush(self):
+        try:
+            self._stdout.flush()
+        except Exception:
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+try:
+    _sys.stderr = _StderrFilter(_sys.stderr, _sys.stdout)
+except Exception:
+    pass
 
 from config import (
     SECRET_KEY, ADMIN_PASSWORD, UPLOAD_TEMP_DIR, ALLOWED_EXTENSIONS,
@@ -80,7 +126,7 @@ def _init_phase3_modules():
                 SESSION_KEY_PREFIX=SESSION_KEY_PREFIX,
             )
             Session(app)
-            print(f"[Phase3] ✅ Session: Redis (prefix={SESSION_KEY_PREFIX}, TTL={SESSION_LIFETIME_SECONDS}s)")
+            print(f"[Phase3] [OK] Session: Redis (prefix={SESSION_KEY_PREFIX}, TTL={SESSION_LIFETIME_SECONDS}s)")
         elif SESSION_TYPE == 'filesystem':
             os.makedirs(SESSION_FILE_DIR, exist_ok=True)
             app.config.update(
@@ -92,13 +138,13 @@ def _init_phase3_modules():
                 SESSION_KEY_PREFIX=SESSION_KEY_PREFIX,
             )
             Session(app)
-            print(f"[Phase3] ✅ Session: Filesystem ({SESSION_FILE_DIR})")
+            print(f"[Phase3] [OK] Session: Filesystem ({SESSION_FILE_DIR})")
         else:
-            print(f"[Phase3] ⚠️  Session: 默认内存 (仅单副本安全, SESSION_TYPE={SESSION_TYPE})")
+            print(f"[Phase3] [WARN] Session: in-memory default (single-instance only, SESSION_TYPE={SESSION_TYPE})")
     except ImportError as e:
-        print(f"[Phase3] ⚠️  flask-session 未安装或初始化失败，使用默认内存 Session: {e}")
+        print(f"[Phase3] [WARN] flask-session not installed or init failed, using in-memory Session: {e}")
     except Exception as e:
-        print(f"[Phase3] ⚠️  Session 初始化失败，降级为内存 Session: {e}")
+        print(f"[Phase3] [WARN] Session init failed, falling back to in-memory Session: {e}")
 
     # 2. Prometheus Metrics
     try:
@@ -107,11 +153,11 @@ def _init_phase3_modules():
         _metrics.register_flask(app)
         # 把 Redis 命中监控挂钩到 cache_get
         _metrics.set_redis_enabled(CACHE_ENABLED and _redis_client is not None)
-        print(f"[Phase3] ✅ Metrics: 已启用 (端点 /metrics)")
+        print(f"[Phase3] [OK] Metrics: enabled (endpoint /metrics)")
     except ImportError as e:
-        print(f"[Phase3] ⚠️  Metrics 跳过 (prometheus-client 未安装): {e}")
+        print(f"[Phase3] [WARN] Metrics skipped (prometheus-client not installed): {e}")
     except Exception as e:
-        print(f"[Phase3] ⚠️  Metrics 初始化异常: {e}")
+        print(f"[Phase3] [WARN] Metrics init error: {e}")
 
     # 3. Leader Election (领导者选举)
     try:
@@ -124,19 +170,19 @@ def _init_phase3_modules():
             _leader_elector.on_leader_change(
                 lambda is_ldr: _metrics.set_is_leader(is_ldr)
             )
-        print(f"[Phase3] ✅ Leader Election: 已初始化")
+        print(f"[Phase3] [OK] Leader Election: initialized")
     except Exception as e:
-        print(f"[Phase3] ⚠️  Leader Election 初始化失败: {e}")
+        print(f"[Phase3] [WARN] Leader Election init failed: {e}")
 
     # 4. Ollama Load Balancer (预初始化，保证健康检查线程启动)
     try:
         from ollama_lb import get_ollama_lb
         _ollama_lb = get_ollama_lb()
         lb_status = _ollama_lb.get_all_nodes_status()
-        print(f"[Phase3] ✅ Ollama LB: {len(lb_status)} 节点 "
-              f"(健康 {sum(1 for n in lb_status if n['healthy'])}/{len(lb_status)})")
+        print(f"[Phase3] [OK] Ollama LB: {len(lb_status)} nodes "
+              f"(healthy {sum(1 for n in lb_status if n['healthy'])}/{len(lb_status)})")
     except Exception as e:
-        print(f"[Phase3] ⚠️  Ollama LB 初始化异常: {e}")
+        print(f"[Phase3] [WARN] Ollama LB init error: {e}")
 
     # 5. DB 统计初始化 (metrics gauge)
     if _metrics:
@@ -173,7 +219,7 @@ def _init_redis():
     """初始化 Redis 连接。失败时自动降级，不影响主功能。"""
     global _redis_client, _cache_enabled
     if not CACHE_ENABLED:
-        print("[Cache] 缓存已通过配置禁用 (CACHE_ENABLED=false)")
+        print("[Cache] Cache disabled via config (CACHE_ENABLED=false)")
         return
     try:
         import redis as redis_lib
@@ -186,14 +232,14 @@ def _init_redis():
         )
         # 测试连接
         _redis_client.ping()
-        print(f"[Cache] Redis 连接成功: {REDIS_URL}")
+        print(f"[Cache] Redis connected: {REDIS_URL}")
         _cache_enabled = True
     except ImportError:
-        print("[Cache] redis 模块未安装，缓存已禁用")
+        print("[Cache] redis module not installed, cache disabled")
         _cache_enabled = False
         _redis_client = None
     except Exception as e:
-        print(f"[Cache] Redis 连接失败 ({e})，缓存已禁用（自动降级）")
+        print(f"[Cache] Redis connection failed ({e}), cache disabled (auto fallback)")
         _cache_enabled = False
         _redis_client = None
 
@@ -227,7 +273,7 @@ def cache_get(key):
         return json.loads(raw)
     except Exception as e:
         # Redis 出错时静默失败，不影响主流程
-        print(f"[Cache] cache_get 出错: {e}")
+        print(f"[Cache] cache_get error: {e}")
         if _metrics:
             _metrics.observe_redis_error('get')
         return None
@@ -246,7 +292,7 @@ def cache_set(key, value, ttl=None):
         _redis_client.setex(key, ttl, serialized)
         return True
     except Exception as e:
-        print(f"[Cache] cache_set 出错: {e}")
+        print(f"[Cache] cache_set error: {e}")
         return False
 
 def cache_invalidate(pattern):
@@ -267,10 +313,10 @@ def cache_invalidate(pattern):
             if cursor == 0:
                 break
         if count > 0:
-            print(f"[Cache] 失效缓存: {pattern} ({count} 个 key)")
+            print(f"[Cache] invalidated keys: {pattern} ({count} keys)")
         return count
     except Exception as e:
-        print(f"[Cache] cache_invalidate 出错: {e}")
+        print(f"[Cache] cache_invalidate error: {e}")
         return 0
 
 def cache_clear_all():
@@ -516,14 +562,14 @@ def _refresh_delta_dashboard():
         leader_tag = ""
         if _leader_elector is not None:
             leader_tag = " [LEADER]"
-        print(f"[Delta]{leader_tag} 仪表盘数据预计算完成，已写入缓存")
+        print(f"[Delta]{leader_tag} dashboard data precomputed and cached")
         if _metrics:
             _metrics.inc_delta_compute_run('success')
     except Exception as e:
         err_type = type(e).__name__
         import traceback
         traceback.print_exc()
-        print(f"[Delta] 预计算出错: {e}")
+        print(f"[Delta] precompute error: {e}")
         if _metrics:
             _metrics.inc_delta_compute_run('error')
             _metrics.inc_delta_compute_error(err_type)
@@ -537,18 +583,18 @@ def _delta_background_updater():
     然后每隔 DELTA_REFRESH_INTERVAL 秒刷新一次。
     """
     # 启动延迟，等待数据库就绪
-    print(f"[Delta] 后台预计算线程启动，等待 {DELTA_INITIAL_DELAY} 秒后首次计算...")
+    print(f"[Delta] background precompute thread started, first run in {DELTA_INITIAL_DELAY}s...")
     time.sleep(DELTA_INITIAL_DELAY)
 
     while True:
         try:
             _refresh_delta_dashboard()
         except Exception as e:
-            print(f"[Delta] 后台刷新异常: {e}")
+            print(f"[Delta] background refresh error: {e}")
 
         # 间隔为 0 表示只计算一次
         if DELTA_REFRESH_INTERVAL <= 0:
-            print("[Delta] DELTA_REFRESH_INTERVAL=0，后台刷新已停止")
+            print("[Delta] DELTA_REFRESH_INTERVAL=0, background refresh stopped")
             break
 
         time.sleep(DELTA_REFRESH_INTERVAL)
@@ -558,14 +604,14 @@ def start_delta_background_updater():
     仅在缓存可用且刷新间隔 > 0 时启动。
     """
     if DELTA_REFRESH_INTERVAL <= 0:
-        print("[Delta] DELTA_REFRESH_INTERVAL=0，跳过后台预计算线程")
+        print("[Delta] DELTA_REFRESH_INTERVAL=0, skip background precompute thread")
         return
     if not _cache_enabled:
-        print("[Delta] 缓存未启用，跳过后台预计算线程")
+        print("[Delta] cache disabled, skip background precompute thread")
         return
     t = threading.Thread(target=_delta_background_updater, daemon=True)
     t.start()
-    print(f"[Delta] 后台预计算线程已启动，刷新间隔: {DELTA_REFRESH_INTERVAL}秒")
+    print(f"[Delta] background precompute thread started, refresh interval: {DELTA_REFRESH_INTERVAL}s")
 
 # 启动 Delta 后台刷新线程
 start_delta_background_updater()
@@ -2032,19 +2078,19 @@ def admin_leader_status():
 
 
 if __name__ == '__main__':
-    cache_status = 'enabled (Redis)' if (_cache_enabled and _redis_client is not None) else 'disabled (降级为无缓存)'
+    cache_status = 'enabled (Redis)' if (_cache_enabled and _redis_client is not None) else 'disabled (no cache)'
     delta_status = 'enabled' if DELTA_REFRESH_INTERVAL and DELTA_REFRESH_INTERVAL > 0 else 'disabled'
     frontend_ok = os.path.isdir(FRONTEND_DIR)
     print("=" * 68)
-    print(f"  {APP_NAME}")
-    print(f"  ├─ 版本:         {APP_VERSION}")
-    print(f"  ├─ 监听:         {FLASK_HOST}:{FLASK_PORT}")
-    print(f"  ├─ 数据库:       {DB_TYPE}")
-    print(f"  ├─ 缓存:         {cache_status}")
-    print(f"  ├─ Session:      {SESSION_TYPE}")
-    print(f"  ├─ Delta预计算:  {delta_status} (间隔 {DELTA_REFRESH_INTERVAL}s)")
-    print(f"  ├─ Metrics:      {'/metrics' if _metrics else 'disabled'}")
-    print(f"  ├─ LeaderElec:   {'enabled' if _leader_elector else 'disabled'}", end="")
+    print("  van.ea Vehicle Part Smart Search")
+    print(f"  |- Version:       {APP_VERSION}")
+    print(f"  |- Listen:        {FLASK_HOST}:{FLASK_PORT}")
+    print(f"  |- Database:      {DB_TYPE}")
+    print(f"  |- Cache:         {cache_status}")
+    print(f"  |- Session:       {SESSION_TYPE}")
+    print(f"  |- Delta precomp: {delta_status} (interval {DELTA_REFRESH_INTERVAL}s)")
+    print(f"  |- Metrics:       {'/metrics' if _metrics else 'disabled'}")
+    print(f"  |- LeaderElec:    {'enabled' if _leader_elector else 'disabled'}", end="")
     if _leader_elector:
         print(f"  is_leader={bool(_leader_elector.is_leader)} redis={_leader_elector._redis is not None}")
     else:
@@ -2052,16 +2098,16 @@ if __name__ == '__main__':
     if _ollama_lb:
         lb_nodes = _ollama_lb.get_all_nodes_status()
         lb_healthy = sum(1 for n in lb_nodes if n.get('healthy'))
-        print(f"  ├─ Ollama LB:    {lb_healthy}/{len(lb_nodes)} nodes healthy")
+        print(f"  |- Ollama LB:     {lb_healthy}/{len(lb_nodes)} nodes healthy")
     else:
-        print(f"  ├─ Ollama LB:    disabled")
-    print(f"  ├─ 前端目录:     {FRONTEND_DIR}  exists={frontend_ok}")
-    print(f"  ├─ Query:        http://localhost:{FLASK_PORT}/")
-    print(f"  ├─ Admin:        http://localhost:{FLASK_PORT}/admin")
-    print(f"  ├─ Health:       http://localhost:{FLASK_PORT}/api/health")
+        print(f"  |- Ollama LB:     disabled")
+    print(f"  |- Frontend dir:  {FRONTEND_DIR}  exists={frontend_ok}")
+    print(f"  |- Query:         http://localhost:{FLASK_PORT}/")
+    print(f"  |- Admin:         http://localhost:{FLASK_PORT}/admin")
+    print(f"  |- Health:        http://localhost:{FLASK_PORT}/api/health")
     if _metrics:
-        print(f"  └─ Metrics:      http://localhost:{FLASK_PORT}/metrics")
-    print("  (管理员密码不在此处显示, 通过环境变量 ADMIN_PASSWORD 设置)")
+        print(f"  +- Metrics:       http://localhost:{FLASK_PORT}/metrics")
+    print("  (admin password not shown here; set via env var ADMIN_PASSWORD)")
     print("=" * 68)
     # 本地/原生运行: Flask 内置服务器 (threaded 提升并发);
     # Docker 生产环境通过 Dockerfile 使用 gunicorn 多进程运行。

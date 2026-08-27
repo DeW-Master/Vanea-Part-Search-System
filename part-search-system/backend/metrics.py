@@ -76,7 +76,7 @@ class MetricsManager:
             # 启用基础指标 (进程 + Python)
             pc.ProcessCollector(registry=self._registry)
         except ImportError:
-            print("[Metrics] prometheus_client 未安装，指标已禁用")
+            print("[Metrics] prometheus_client not installed, metrics disabled")
             self.enabled = False
 
     def _declare_metrics(self):
@@ -315,7 +315,7 @@ class MetricsManager:
             except Exception:
                 pass
         except Exception as e:
-            print(f"[Metrics] after_request 异常: {e}")
+            print(f"[Metrics] after_request error: {e}")
         return response
 
     def teardown_request(self, exc):
@@ -366,7 +366,7 @@ class MetricsManager:
             data = self._pc.generate_latest(self._registry)
             return Response(data, mimetype=self._pc.CONTENT_TYPE_LATEST)
 
-        print(f"[Metrics] 已注册端点: {endpoint_path}")
+        print(f"[Metrics] endpoint registered: {endpoint_path}")
 
     # ============== 对外 API: 业务指标 ==============
     def observe_redis(self, hit: bool):

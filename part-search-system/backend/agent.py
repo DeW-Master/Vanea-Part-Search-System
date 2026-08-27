@@ -31,7 +31,7 @@ def _get_lb():
         _lb_cache[0] = get_ollama_lb()
         return _lb_cache[0]
     except Exception as e:
-        print(f"[Agent] Ollama LB 不可用，回退直连 {OLLAMA_URL}: {e}")
+        print(f"[Agent] Ollama LB unavailable, falling back to direct {OLLAMA_URL}: {e}")
         _lb_cache[0] = False
         return None
 
