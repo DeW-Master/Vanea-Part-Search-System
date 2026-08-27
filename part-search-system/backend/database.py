@@ -14,6 +14,7 @@ from difflib import SequenceMatcher
 import openpyxl
 
 from config import DB_PATH, PART_NUMBER_HEADERS, DB_TYPE
+from models import Part, StageCatalog, determine_change_type, norm
 
 db_lock = threading.Lock()
 
@@ -1726,6 +1727,7 @@ class DatabaseManager:
     def _load_enigma_enrichment(self, conn):
         """加载 supplementary (ENIGMA 主表) 数据, 按 part_number 索引做富化。
         同一 PN 出现多次时, 后导入 (id 更大) 的覆盖。
+        PN 统一首尾去空白 (BOM 与 ENIGMA 的导出格式可能不一致)。
         """
         rows = conn.execute(
             "SELECT part_number, data FROM parts_data pd "
@@ -1735,7 +1737,7 @@ class DatabaseManager:
         ).fetchall()
         out = {}
         for r in rows:
-            pn = r['part_number']
+            pn = norm(r['part_number'])
             if not pn:
                 continue
             try:
@@ -1754,17 +1756,16 @@ class DatabaseManager:
         return out
 
     def _load_enigma_value_index(self, conn):
-        """加载 supplementary (ENIGMA 主表) 中每个 PN 的 EC/KEM/FAV 全部取值集合。
+        """加载 supplementary (ENIGMA 主表) 中每个 PN 的 EC/KEM/FAV/SOMA 全部取值集合。
 
         与 _load_enigma_enrichment (同 PN 合并为单条) 不同, 这里按 PN 收集
         所有行的非空取值 —— 同一 PN 在 ENIGMA 可能有多行, 对应多个 EC (Bundle Number)。
 
-        返回: {pn: {'ec': set(), 'kem': set(), 'fav': set()}}
+        返回: {pn: {'ec': set(), 'kem': set(), 'fav': set(), 'soma': set()}}
+        列名全部走 DELTA_BUSINESS_FIELDS 业务键映射, 无硬编码。
         """
         from config import DELTA_BUSINESS_FIELDS
-        ec_col = DELTA_BUSINESS_FIELDS['ec']    # Bundle Number
-        kem_col = DELTA_BUSINESS_FIELDS['kem']  # KEM Number
-        fav_col = DELTA_BUSINESS_FIELDS['fav']  # FAV
+        key_cols = tuple((key, DELTA_BUSINESS_FIELDS[key]) for key in ('ec', 'kem', 'fav', 'soma'))
         rows = conn.execute(
             "SELECT part_number, data FROM parts_data pd "
             "JOIN uploaded_files uf ON uf.id = pd.file_id "
@@ -1773,41 +1774,48 @@ class DatabaseManager:
         ).fetchall()
         idx = {}
         for r in rows:
-            pn = r['part_number']
+            pn = norm(r['part_number'])
             if not pn:
                 continue
             try:
                 d = json.loads(r['data'])
             except Exception:
                 continue
-            entry = idx.setdefault(pn, {'ec': set(), 'kem': set(), 'fav': set()})
-            for key, col in (('ec', ec_col), ('kem', kem_col), ('fav', fav_col)):
+            entry = idx.setdefault(pn, {'ec': set(), 'kem': set(), 'fav': set(), 'soma': set()})
+            for key, col in key_cols:
                 v = str(d.get(col, '')).strip()
                 if v:
                     entry[key].add(v)
         return idx
 
-    def _build_stage_pn_map(self, conn, stage, part_number=None):
-        """获取某阶段所有 PN 的 map (key=pn, value={zgs, data, id, file_id})。
+    def _build_stage_catalog(self, conn, stage, part_number=None,
+                             enigma_map=None, enigma_index=None):
+        """构建某阶段的 StageCatalog ({pn: Part}, 领域模型)。
 
         数据源: 该阶段 BOM 文件 (file_type='BOM' AND stage=stage) 的 parts_data 行,
-        可选地用 ENIGMA 主表 (supplementary) 按 PN 富化业务字段 (EC/FAV/KEM/状态等)。
+        用 ENIGMA 主表 (supplementary) 按 PN 富化业务字段 (EC/FAV/KEM/状态等),
+        并把 ENIGMA 多值索引挂到 Part.enigma_values (None 表示该 PN 不在 ENIGMA)。
         同 PN 多条记录时只保留第一条 (按 id 升序)。
 
         参数:
             conn: 数据库连接
             stage: 阶段名 (pre-TO/TO1/TO2)
             part_number: 可选的 PN 过滤 (模糊匹配)
+            enigma_map / enigma_index: 可选, 预先加载的 ENIGMA 富化/多值索引
+                (dashboard 一次加载供三个阶段复用, 避免重复查询)
 
         返回:
-            {pn: {id, file_id, zgs, data}} 的字典 (data 已含 ENIGMA 富化)
+            StageCatalog
         """
-        from config import DELTA_BUSINESS_FIELDS
         file_ids = self._get_stage_file_ids(conn, stage)
+        catalog = StageCatalog(stage)
         if not file_ids:
-            return {}
+            return catalog
 
-        enigma_map = self._load_enigma_enrichment(conn)
+        if enigma_map is None:
+            enigma_map = self._load_enigma_enrichment(conn)
+        if enigma_index is None:
+            enigma_index = self._load_enigma_value_index(conn)
 
         # 一次拉取该阶段所有 BOM 行
         ph = ",".join(["?"] * len(file_ids))
@@ -1822,11 +1830,9 @@ class DatabaseManager:
         sql += " ORDER BY id"
         rows = conn.execute(sql, params).fetchall()
 
-        zgs_col = DELTA_BUSINESS_FIELDS["zgs"]  # "ZGS"
-        pn_map = {}
         for r in rows:
-            pn = r['part_number']
-            if not pn or pn in pn_map:
+            pn = norm(r['part_number'])
+            if not pn or pn in catalog:
                 continue
             try:
                 d = json.loads(r['data'])
@@ -1837,13 +1843,11 @@ class DatabaseManager:
             for k, v in enr.items():
                 if d.get(k) in (None, ''):
                     d[k] = v
-            pn_map[pn] = {
-                'id': r['id'],
-                'file_id': r['file_id'],
-                'zgs': str(d.get(zgs_col, '')).strip(),
-                'data': d,
-            }
-        return pn_map
+            catalog.add(Part.from_row(
+                r['id'], r['file_id'], pn, d,
+                stage=stage, enigma_values=enigma_index.get(pn),
+            ))
+        return catalog
 
     def calculate_delta(self, from_stage="pre-TO", to_stage="TO1",
                          change_filter=None, part_number=None, page=1, page_size=50):
@@ -1862,41 +1866,40 @@ class DatabaseManager:
         - EC检测：检查后阶段PN在ENIGMA记录中是否存在EC(BuendelNr)
         - ZEUS/FAV：有EC的PN需验证ZEUS(FAV)信息是否已更新
         """
-        from config import DELTA_FIELD_CONFIG, DELTA_BUSINESS_FIELDS
+        from config import DELTA_FIELD_CONFIG
         conn = get_db()
-        col_names = [r['english_name'] for r in conn.execute(
-            'SELECT english_name FROM unified_columns').fetchall()]
+        col_names = {r['english_name'] for r in conn.execute(
+            'SELECT english_name FROM unified_columns').fetchall()}
 
-        ec_col = DELTA_BUSINESS_FIELDS['ec']    # Bundle Number
-        fav_col = DELTA_BUSINESS_FIELDS['fav']  # FAV
-
-        # 2-4. 构建两阶段的PN map（复用 _build_stage_pn_map）
-        from_map = self._build_stage_pn_map(conn, from_stage, part_number)
-        to_map = self._build_stage_pn_map(conn, to_stage, part_number)
+        # 2-4. 构建两阶段的 StageCatalog (ENIGMA 富化/索引只加载一次)
+        enigma_map = self._load_enigma_enrichment(conn)
+        enigma_index = self._load_enigma_value_index(conn)
+        from_catalog = self._build_stage_catalog(
+            conn, from_stage, part_number, enigma_map, enigma_index)
+        to_catalog = self._build_stage_catalog(
+            conn, to_stage, part_number, enigma_map, enigma_index)
         conn.close()
 
         # 1b. Delta 数据校验：两阶段数据均不能为空
-        if not from_map:
+        if not from_catalog:
             return {"success": False, "error": f"Delta 数据校验失败：前阶段 '{from_stage}' 无BOM数据，请先导入该阶段数据"}
-        if not to_map:
+        if not to_catalog:
             return {"success": False, "error": f"Delta 数据校验失败：后阶段 '{to_stage}' 无BOM数据，请先导入该阶段数据"}
 
-        # 5. PN+ZGS 组合对比（复用 _compute_delta_pairs）
-        delta_pairs = self._compute_delta_pairs(from_map, to_map)
+        # 5. PN+ZGS 组合对比 (StageCatalog 集合运算)
+        delta_pairs = from_catalog.delta_pairs(to_catalog)
 
         # 构建完整的 delta 对象（含字段级变化详情，用于下钻展示）
         deltas = []
         for pair in delta_pairs:
-            delta = self._build_delta(
-                pair['part_number'], pair['from_info'], pair['to_info'],
-                pair['match_type'], DELTA_FIELD_CONFIG, col_names)
+            delta = self._build_delta_from_pair(pair, DELTA_FIELD_CONFIG, col_names)
+            to_part = pair.to_part
             # EC 检测：检查后阶段 PN 在 ENIGMA 记录中是否存在 EC
-            to_data = pair['to_info']['data'] if pair['to_info'] else {}
-            ec_value = str(to_data.get(ec_col, '')).strip()
+            ec_value = to_part.ec if to_part else ''
             delta['has_ec'] = bool(ec_value)
             delta['ec_value'] = ec_value
             # ZEUS/FAV 信息更新验证：有EC的PN需验证FAV(ZEUS ID)是否已填写
-            fav_value = str(to_data.get(fav_col, '')).strip()
+            fav_value = to_part.fav if to_part else ''
             delta['has_zeus'] = bool(fav_value)
             delta['zeus_updated'] = bool(ec_value and fav_value)
             delta['fav_value'] = fav_value
@@ -1935,55 +1938,26 @@ class DatabaseManager:
             "to_stage": to_stage,
         }
 
-    def _build_delta(self, pn, from_info, to_info, match_type,
-                      field_config, col_names):
-        """构建单个零件的 Delta，包含enigma完整数据用于下钻。"""
-        from_data = from_info['data'] if from_info else {}
-        to_data = to_info['data'] if to_info else {}
-
-        changes = []
-        for cfg in field_config:
-            field = cfg['field']
-            if field not in col_names and cfg['track']:
-                changes.append({
-                    "field": field,
-                    "business": cfg['business'],
-                    "priority": cfg['priority'],
-                    "old_value": "",
-                    "new_value": "",
-                    "change_type": "unavailable"
-                })
-                continue
-            if field not in col_names:
-                continue
-            old_val = str(from_data.get(field, '')).strip() if from_data else ''
-            new_val = str(to_data.get(field, '')).strip() if to_data else ''
-            change_type = self._determine_change_type(field, old_val, new_val, cfg['business'])
-            changes.append({
-                "field": field,
-                "business": cfg['business'],
-                "priority": cfg['priority'],
-                "old_value": old_val,
-                "new_value": new_val,
-                "change_type": change_type
-            })
-        changes.sort(key=lambda c: (c['priority'], 0 if c['change_type'] != 'unchanged' else 1))
+    def _build_delta_from_pair(self, pair, field_config, col_names):
+        """由 DeltaPair 构建单个零件的 Delta dict (API 形状保持不变)。"""
+        changes = [c.to_dict() for c in Part.diff_parts(
+            pair.from_part, pair.to_part, field_config, col_names)]
 
         # enigma数据（完整记录信息，用于下钻查看详情）
         enigma = {}
-        if from_info:
-            enigma['from_record'] = from_info['data']
-        if to_info:
-            enigma['to_record'] = to_info['data']
+        if pair.from_part:
+            enigma['from_record'] = pair.from_part.data
+        if pair.to_part:
+            enigma['to_record'] = pair.to_part.data
 
         return {
-            "part_number": pn,
-            "match_type": match_type,
+            "part_number": pair.pn,
+            "match_type": pair.match_type,
             "changes": changes,
             "has_changes": True,
             "enigma": enigma,
-            "record_id_old": from_info['id'] if from_info else None,
-            "record_id_new": to_info['id'] if to_info else None,
+            "record_id_old": pair.from_part.row_id if pair.from_part else None,
+            "record_id_new": pair.to_part.row_id if pair.to_part else None,
         }
 
     def get_delta_detail(self, part_number, from_stage=None, to_stage=None):
@@ -2051,8 +2025,7 @@ class DatabaseManager:
                     to_val = to_data.get(field_name)
                     field_display = field_name
 
-                change_type = self._determine_change_type(
-                    field_name, from_val, to_val, cfg['business'])
+                change_type = determine_change_type(cfg.get('key') or '', from_val, to_val)
 
                 fields.append({
                     'business': cfg['business'],
@@ -2108,61 +2081,8 @@ class DatabaseManager:
             ],
         }
 
-    def _compute_delta_pairs(self, from_map, to_map):
-        """PN+ZGS 组合对比，返回 delta pairs 列表。
-
-        复用 calculate_delta 中第5步的对比逻辑：
-        - 同PN + 同ZGS = 无delta（跳过）
-        - 同PN + 不同ZGS = ZGS升级delta (zgs_upgraded)
-        - 后阶段有PN前阶段没有 = 新增零件delta (new_part)
-        - 前阶段有PN后阶段没有 = PN停用delta (discontinued_part)
-
-        参数:
-            from_map: 前阶段PN map {pn: {id, zgs, data}}
-            to_map: 后阶段PN map {pn: {id, zgs, data}}
-
-        返回:
-            deltas 列表，每个元素包含:
-            {part_number, match_type, from_info, to_info}
-            match_type: "zgs_upgraded" | "new_part" | "discontinued_part"
-        """
-        deltas = []
-
-        # 5a. 同PN比较ZGS: 同PN+同ZGS=跳过, 同PN+不同ZGS=升级delta
-        for pn in sorted(set(from_map.keys()) & set(to_map.keys())):
-            from_zgs = from_map[pn]['zgs']
-            to_zgs = to_map[pn]['zgs']
-            if from_zgs == to_zgs:
-                continue  # 同PN+同ZGS = 无delta
-            deltas.append({
-                'part_number': pn,
-                'match_type': 'zgs_upgraded',
-                'from_info': from_map[pn],
-                'to_info': to_map[pn],
-            })
-
-        # 5b. 新增零件（仅存在于后阶段）
-        for pn in sorted(set(to_map.keys()) - set(from_map.keys())):
-            deltas.append({
-                'part_number': pn,
-                'match_type': 'new_part',
-                'from_info': None,
-                'to_info': to_map[pn],
-            })
-
-        # 5c. PN停用（仅存在于前阶段）
-        for pn in sorted(set(from_map.keys()) - set(to_map.keys())):
-            deltas.append({
-                'part_number': pn,
-                'match_type': 'discontinued_part',
-                'from_info': from_map[pn],
-                'to_info': None,
-            })
-
-        return deltas
-
-    def _compute_kpi_from_delta_pairs(self, delta_pairs, enigma_index=None):
-        """从 delta pairs 计算 Dashboard KPI 数据。
+    def _compute_kpi_from_delta_pairs(self, delta_pairs):
+        """从 DeltaPair 列表计算 Dashboard KPI 数据。
 
         新 PN / 新 EC 逻辑 (按用户定义):
         - D1 = 仅存在于后阶段的 PN 集合 (match_type == 'new_part'), new_pn = D1.size
@@ -2170,17 +2090,11 @@ class DatabaseManager:
           则把该 PN 的全部 EC 值加入 EC 集合; new_ec = EC 集合大小 (distinct Bundle Number)
         - new_kem: D1 中有 EC 的 PN 的 KEM 取值集合大小 (KEM 是 EC 的子集)
         - ec_with_zeus: D1 中有 EC 且 FAV (ZEUS ID) 已填写的 PN 数
-
-        参数:
-            delta_pairs: _compute_delta_pairs 返回的列表
-            enigma_index: _load_enigma_value_index 返回的 {pn: {'ec','kem','fav'}} 索引
+        ENIGMA 多值集合已挂在 Part.enigma_values 上, 无需外部索引参数。
 
         返回:
             {new_pn, discontinued_pn, zgs_changed, total_delta, new_ec, new_kem, soma_ja, ec_with_zeus}
         """
-        if enigma_index is None:
-            enigma_index = {}
-
         new_pn = 0
         discontinued_pn = 0
         zgs_changed = 0
@@ -2190,30 +2104,25 @@ class DatabaseManager:
         ec_with_zeus = 0
 
         for pair in delta_pairs:
-            match_type = pair['match_type']
-            from_info = pair['from_info']
-            to_info = pair['to_info']
+            match_type = pair.match_type
 
             if match_type == 'new_part':
                 new_pn += 1
                 # 新 PN 查 ENIGMA: PN 存在且 find EC == true, 则 EC.add(PN.EC)
-                enr = enigma_index.get(pair['part_number'])
-                if enr and enr['ec']:
-                    new_ec_set.update(enr['ec'])
-                    new_kem_set.update(enr['kem'])
-                    if enr['fav']:
+                to_part = pair.to_part
+                if to_part and to_part.ec_values:
+                    new_ec_set |= to_part.ec_values
+                    new_kem_set |= to_part.kem_values
+                    if to_part.fav_values:
                         ec_with_zeus += 1
             elif match_type == 'discontinued_part':
                 discontinued_pn += 1
             elif match_type == 'zgs_upgraded':
                 zgs_changed += 1
 
-            from_data = from_info['data'] if from_info else {}
-            to_data = to_info['data'] if to_info else {}
-
             # SOMA in ZEUS 从无到有 / 从'nein'变为'ja' (若数据含该字段)
-            from_soma = str(from_data.get('SOMA in ZEUS', '')).strip().lower() if from_data else ''
-            to_soma = str(to_data.get('SOMA in ZEUS', '')).strip().lower() if to_data else ''
+            from_soma = pair.from_part.soma.lower() if pair.from_part else ''
+            to_soma = pair.to_part.soma.lower() if pair.to_part else ''
             if from_soma != 'ja' and to_soma == 'ja':
                 soma_ja += 1
 
@@ -2234,84 +2143,33 @@ class DatabaseManager:
         阶段归属统一走 uploaded_files.stage (BOM 文件), EC/FAV/KEM 等业务字段
         来自 supplementary (ENIGMA 主表) 按 PN 富化。
         """
-        from config import DELTA_BUSINESS_FIELDS
         conn = get_db()
 
-        ec_col = DELTA_BUSINESS_FIELDS['ec']           # Bundle Number
-        fav_col = DELTA_BUSINESS_FIELDS['fav']         # FAV
-        fav_status_col = DELTA_BUSINESS_FIELDS['fav_status']  # FAV Status Short
-        soma_col = 'SOMA in ZEUS'
-        kem_col = DELTA_BUSINESS_FIELDS['kem']         # KEM Number
-        ec_status_col = DELTA_BUSINESS_FIELDS['ec_status']  # ProzessStatusDetail
-
-        # === 1. 各阶段 PN map (含 ENIGMA 富化) ===
-        stage_maps = {
-            'pre-TO': self._build_stage_pn_map(conn, 'pre-TO'),
-            'TO1': self._build_stage_pn_map(conn, 'TO1'),
-            'TO2': self._build_stage_pn_map(conn, 'TO2'),
+        # === 1. 各阶段 StageCatalog (ENIGMA 富化/索引只加载一次, 三阶段复用) ===
+        enigma_map = self._load_enigma_enrichment(conn)
+        enigma_index = self._load_enigma_value_index(conn)
+        catalogs = {
+            s: self._build_stage_catalog(conn, s, enigma_map=enigma_map,
+                                         enigma_index=enigma_index)
+            for s in ('pre-TO', 'TO1', 'TO2')
         }
 
-        def _stage_stats(pn_map):
-            total = len(pn_map)
-            pn_count = total
-            ec_set = set()
-            ec_pn_set = set()
-            fav_set = set()
-            fav_pn_set = set()
-            kem_set = set()
-            soma_ja = 0
-            for pn, info in pn_map.items():
-                d = info['data']
-                ec_v = str(d.get(ec_col, '')).strip()
-                if ec_v:
-                    ec_set.add(ec_v)
-                    ec_pn_set.add(pn)
-                fav_v = str(d.get(fav_col, '')).strip()
-                if fav_v:
-                    fav_set.add(fav_v)
-                    fav_pn_set.add(pn)
-                kem_v = str(d.get(kem_col, '')).strip()
-                if kem_v:
-                    kem_set.add(kem_v)
-                if str(d.get(soma_col, '')).strip().lower() == 'ja':
-                    soma_ja += 1
-            return {
-                'total_records': total,
-                'unique_pn': pn_count,
-                'ec_count': len(ec_set),
-                'ec_pn': len(ec_pn_set),
-                'fav_count': len(fav_set),
-                'fav_pn': len(fav_pn_set),
-                'kem_count': len(kem_set),
-                'soma_ja': soma_ja,
-            }
+        stage_stats = {s: c.stats() for s, c in catalogs.items()}
 
-        stage_stats = {s: _stage_stats(m) for s, m in stage_maps.items()}
-
-        # === 2. Delta KPI (PN+ZGS 组合匹配) ===
-        delta1_pairs = self._compute_delta_pairs(stage_maps['pre-TO'], stage_maps['TO1'])
-        delta2_pairs = self._compute_delta_pairs(stage_maps['TO1'], stage_maps['TO2'])
-        enigma_index = self._load_enigma_value_index(conn)
-        delta1_kpi_full = self._compute_kpi_from_delta_pairs(delta1_pairs, enigma_index)
-        delta2_kpi_full = self._compute_kpi_from_delta_pairs(delta2_pairs, enigma_index)
+        # === 2. Delta KPI (PN+ZGS 组合匹配, 集合运算) ===
+        delta1_pairs = catalogs['pre-TO'].delta_pairs(catalogs['TO1'])
+        delta2_pairs = catalogs['TO1'].delta_pairs(catalogs['TO2'])
+        delta1_kpi_full = self._compute_kpi_from_delta_pairs(delta1_pairs)
+        delta2_kpi_full = self._compute_kpi_from_delta_pairs(delta2_pairs)
         delta1_kpi = {k: v for k, v in delta1_kpi_full.items() if k != 'total_delta'}
         delta2_kpi = {k: v for k, v in delta2_kpi_full.items() if k != 'total_delta'}
-        valid = all(stage_maps[s] for s in ('pre-TO', 'TO1', 'TO2'))
+        valid = all(catalogs[s] for s in ('pre-TO', 'TO1', 'TO2'))
 
         # === 3. EC 状态分布 (饼图) ===
-        def _status_distribution(pn_map, col):
-            cnt = {}
-            for _, info in pn_map.items():
-                v = str(info['data'].get(col, '')).strip()
-                if v:
-                    cnt[v] = cnt.get(v, 0) + 1
-            items = sorted(cnt.items(), key=lambda x: x[1], reverse=True)
-            return [{'name': n, 'value': c} for n, c in items]
-
-        ec_pie_to1 = _status_distribution(stage_maps['TO1'], ec_status_col)
-        ec_pie_to2 = _status_distribution(stage_maps['TO2'], ec_status_col)
-        fav_pie_to1 = _status_distribution(stage_maps['TO1'], fav_status_col)
-        fav_pie_to2 = _status_distribution(stage_maps['TO2'], fav_status_col)
+        ec_pie_to1 = catalogs['TO1'].status_distribution('ec_status')
+        ec_pie_to2 = catalogs['TO2'].status_distribution('ec_status')
+        fav_pie_to1 = catalogs['TO1'].status_distribution('fav_status')
+        fav_pie_to2 = catalogs['TO2'].status_distribution('fav_status')
 
         # === 4. 柱状折线图数据 ===
         stages_order = ['pre-TO', 'TO1', 'TO2']
@@ -2340,30 +2198,6 @@ class DatabaseManager:
             },
             'bar_line': bar_line,
         }
-
-    def _determine_change_type(self, field, old_val, new_val, business_name):
-        """判断字段变化类型。"""
-        # ZGS 升级检测
-        if business_name == "ZGS" and old_val and new_val:
-            try:
-                if int(new_val) > int(old_val):
-                    return "upgraded"
-                elif int(new_val) < int(old_val):
-                    return "changed"
-                else:
-                    return "persisted"
-            except ValueError:
-                pass
-        # 通用判断
-        if not old_val and new_val:
-            return "added"
-        if old_val and not new_val:
-            return "removed"
-        if old_val and new_val and old_val != new_val:
-            return "changed"
-        if old_val and new_val and old_val == new_val:
-            return "persisted"
-        return "unchanged"
 
     def _compute_delta_summary(self, deltas):
         """计算 Delta 统计摘要。"""

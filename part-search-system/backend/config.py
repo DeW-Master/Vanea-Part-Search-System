@@ -186,15 +186,8 @@ PART_NUMBER_HEADERS = [
 # ============ Delta 展示字段配置 ============
 # 注意: 导入管线已把所有原始列统一成英文名 (column_mapping + unified_columns),
 # 数据库里 parts_data.data 存的也是统一英文名。下面所有 field 必须是 unified_columns.english_name。
-DELTA_FIELD_CONFIG = [
-    {"business": "PN",           "field": "Part Number",          "priority": 1, "track": True},
-    {"business": "ZGS",          "field": "ZGS",                  "priority": 1, "track": True},
-    {"business": "ZGS KEM",      "field": "ZGS KEM",              "priority": 1, "track": True},
-    {"business": "ZGS ACM",      "field": "ZGS ACM",              "priority": 1, "track": True},
-    {"business": "ZGS (完整版)", "field": "SNR ZGS KEM Aggregate","priority": 1, "track": True},
-    {"business": "EC",           "field": "Bundle Number",        "priority": 2, "track": True},
-    {"business": "零件名称",     "field": "Part Name",            "priority": 3, "track": True},
-]
+# field 列名优先引用 DELTA_BUSINESS_FIELDS (单点映射), 避免同一列在两处重复配置。
+# key = 业务键 (Part 模型取值/diff 特判用); key=None 表示纯展示字段。
 
 # 阶段权威来源: 上传时选择的 uploaded_files.stage (pre-TO/TO1/TO2, BOM文件) + 关联 file_id。
 # 不再依赖 Baulos_aggr 文本 PRO1/PRO2 匹配 (旧逻辑会把 supplementary 文件行也卷进来导致全 0)。
@@ -216,7 +209,22 @@ DELTA_BUSINESS_FIELDS = {
     "fav":          "FAV",                  # 取代 FAV_fav (ZEUS ID)
     "fav_status":   "FAV Status Short",     # 取代 FAVStatusKurz_fav
     "kem":          "KEM Number",           # 取代 KEM_Nummer
+    "soma":         "SOMA in ZEUS",         # SOMA 是否已在 ZEUS 登记 (ja/nein)
 }
+
+# Delta 两阶段对比 (diff) 的字段配置。
+# business 标签是 API 契约 (前端筛选 / summary 统计使用), 保持稳定;
+# field 列名通过 DELTA_BUSINESS_FIELDS 单点引用, 未来新表任何语言表头
+# 只需在导入时统一列名 (+ 必要时扩展 DELTA_BUSINESS_FIELDS), 此处零改动。
+DELTA_FIELD_CONFIG = [
+    {"business": "PN",           "field": "Part Number",                    "priority": 1, "track": True,  "key": None},
+    {"business": "ZGS",          "field": DELTA_BUSINESS_FIELDS["zgs"],     "priority": 1, "track": True,  "key": "zgs"},
+    {"business": "ZGS KEM",      "field": "ZGS KEM",                        "priority": 1, "track": True,  "key": None},
+    {"business": "ZGS ACM",      "field": "ZGS ACM",                        "priority": 1, "track": True,  "key": None},
+    {"business": "ZGS (完整版)", "field": "SNR ZGS KEM Aggregate",          "priority": 1, "track": True,  "key": None},
+    {"business": "EC",           "field": DELTA_BUSINESS_FIELDS["ec"],      "priority": 2, "track": True,  "key": "ec"},
+    {"business": "零件名称",     "field": "Part Name",                      "priority": 3, "track": True,  "key": None},
+]
 
 # ============ Redis 缓存配置 ============
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
