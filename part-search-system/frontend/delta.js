@@ -238,10 +238,197 @@ function closeDeltaDetail() {
   if (modal) modal.style.display = 'none';
 }
 
-function renderDeltaDetailContent(data, fromStage, toStage) {
-  var comp = data.comparison;
-  var content = document.getElementById('deltaDetailContent');
+// ============================================================
+// BOM 原始列对比渲染 (基于 Part.compare 的零 hardcoding 结构)
+// ============================================================
+function _drillRenderBomCompare(bomCompare, fromLabel, toLabel) {
+  if (!bomCompare) return '';
+  var fromCount = bomCompare.from_field_count || 0;
+  var toCount = bomCompare.to_field_count || 0;
+  var diffCount = bomCompare.diff_count || 0;
 
+  var rows = '';
+  // 仅 from
+  if (bomCompare.only_in_from && bomCompare.only_in_from.length) {
+    bomCompare.only_in_from.forEach(function(f) {
+      var v = (f.from_value === null || f.from_value === undefined) ? '' : String(f.from_value);
+      rows += '<tr style="background:rgba(255,107,107,0.08);">' +
+        '<th style="padding:8px 12px;border:1px solid var(--border);text-align:left;' +
+        'font-size:13px;color:var(--text-secondary);width:180px;">' +
+        escapeHtml(f.field) + '<span style="float:right;font-size:10px;color:#ff9999;' +
+        'font-weight:400;">仅 ' + escapeHtml(fromLabel) + '</span></th>' +
+        '<td style="padding:8px 12px;border:1px solid var(--border);font-size:13px;' +
+        'font-family:monospace;color:#ff9999;">' + escapeHtml(v) + '</td>' +
+        '<td style="padding:8px 12px;border:1px solid var(--border);font-size:13px;' +
+        'font-family:monospace;color:var(--text-tertiary);text-align:center;">—</td>' +
+        '</tr>';
+    });
+  }
+  // 仅 to
+  if (bomCompare.only_in_to && bomCompare.only_in_to.length) {
+    bomCompare.only_in_to.forEach(function(f) {
+      var v = (f.to_value === null || f.to_value === undefined) ? '' : String(f.to_value);
+      rows += '<tr style="background:rgba(0,255,136,0.08);">' +
+        '<th style="padding:8px 12px;border:1px solid var(--border);text-align:left;' +
+        'font-size:13px;color:var(--text-secondary);width:180px;">' +
+        escapeHtml(f.field) + '<span style="float:right;font-size:10px;color:#66ffaa;' +
+        'font-weight:400;">仅 ' + escapeHtml(toLabel) + '</span></th>' +
+        '<td style="padding:8px 12px;border:1px solid var(--border);font-size:13px;' +
+        'font-family:monospace;color:var(--text-tertiary);text-align:center;">—</td>' +
+        '<td style="padding:8px 12px;border:1px solid var(--border);font-size:13px;' +
+        'font-family:monospace;color:#66ffaa;">' + escapeHtml(v) + '</td>' +
+        '</tr>';
+    });
+  }
+  // 共有字段
+  if (bomCompare.common && bomCompare.common.length) {
+    bomCompare.common.forEach(function(c) {
+      var fv = (c.from_value === null || c.from_value === undefined) ? '' : String(c.from_value);
+      var tv = (c.to_value === null || c.to_value === undefined) ? '' : String(c.to_value);
+      var isDiff = c.is_different;
+      var rowBg = isDiff ? 'background:rgba(255,215,0,0.08);' : '';
+      var fromClr = isDiff ? 'color:#ffd700;' : 'color:var(--text-primary);';
+      var toClr = isDiff ? 'color:#ffd700;' : 'color:var(--text-primary);';
+      rows += '<tr style="' + rowBg + '">' +
+        '<th style="padding:8px 12px;border:1px solid var(--border);text-align:left;' +
+        'font-size:13px;color:var(--text-secondary);width:180px;">' +
+        escapeHtml(c.field) + '</th>' +
+        '<td style="padding:8px 12px;border:1px solid var(--border);font-size:13px;' +
+        'font-family:monospace;' + fromClr + '">' + escapeHtml(fv) + '</td>' +
+        '<td style="padding:8px 12px;border:1px solid var(--border);font-size:13px;' +
+        'font-family:monospace;' + toClr + '">' + escapeHtml(tv) + '</td>' +
+        '</tr>';
+    });
+  }
+
+  if (!rows) return '<div style="color:var(--text-tertiary);text-align:center;padding:16px;">无 BOM 字段</div>';
+
+  return (
+    '<div style="margin-bottom:20px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;' +
+      'margin-bottom:10px;">' +
+        '<span style="font-size:13px;font-weight:600;color:var(--silver);' +
+        'letter-spacing:0.5px;">BOM 原始列对比</span>' +
+        '<span style="font-size:12px;color:var(--text-secondary);">' +
+          escapeHtml(fromLabel) + ': ' + fromCount + ' 列 · ' +
+          escapeHtml(toLabel) + ': ' + toCount + ' 列 · ' +
+          '差异 <b style="color:#ffd700;">' + diffCount + '</b>' +
+        '</span>' +
+      '</div>' +
+      '<table style="width:100%;border-collapse:collapse;">' +
+        '<thead><tr style="background:rgba(255,255,255,0.03);">' +
+          '<th style="padding:10px 12px;border:1px solid var(--border);text-align:left;' +
+          'font-size:12px;color:var(--text-secondary);font-weight:600;">字段</th>' +
+          '<th style="padding:10px 12px;border:1px solid var(--border);text-align:left;' +
+          'font-size:12px;color:#ff6b6b;font-weight:600;">' + escapeHtml(fromLabel) + '</th>' +
+          '<th style="padding:10px 12px;border:1px solid var(--border);text-align:left;' +
+          'font-size:12px;color:#00ff88;font-weight:600;">' + escapeHtml(toLabel) + '</th>' +
+        '</tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+      '</table>' +
+    '</div>'
+  );
+}
+
+// ============================================================
+// ENIGMA 参考记录渲染 (单列表格, 非阶段 BOM 数据)
+// ============================================================
+function _drillRenderEnigmaRef(enigmaRef) {
+  if (!enigmaRef || typeof enigmaRef !== 'object') {
+    return (
+      '<div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;' +
+        'margin-bottom:10px;">' +
+          '<span style="font-size:13px;font-weight:600;color:var(--silver);' +
+          'letter-spacing:0.5px;">ENIGMA 主表参考</span>' +
+          '<span style="font-size:11px;color:var(--text-tertiary);' +
+          'font-style:italic;">参考数据 · 非阶段 BOM 数据</span>' +
+        '</div>' +
+        '<div style="color:var(--text-tertiary);text-align:center;padding:16px;' +
+        'border:1px dashed var(--border);border-radius:8px;">该 PN 不在 ENIGMA 主表中</div>' +
+      '</div>'
+    );
+  }
+  var keys = Object.keys(enigmaRef).sort();
+  if (keys.length === 0) {
+    return '<div style="color:var(--text-tertiary);text-align:center;padding:16px;">无参考数据</div>';
+  }
+  var rows = '';
+  keys.forEach(function(k) {
+    var raw = enigmaRef[k];
+    var display = (raw === null || raw === undefined || raw === '') ? '—' : String(raw);
+    rows += '<tr>' +
+      '<th style="padding:7px 12px;border:1px solid var(--border);text-align:left;' +
+      'font-size:12px;color:var(--text-secondary);width:180px;font-weight:500;">' +
+      escapeHtml(k) + '</th>' +
+      '<td style="padding:7px 12px;border:1px solid var(--border);font-size:12px;' +
+      'font-family:monospace;color:var(--text-primary);">' + escapeHtml(display) + '</td>' +
+      '</tr>';
+  });
+  return (
+    '<div>' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;' +
+      'margin-bottom:10px;">' +
+        '<span style="font-size:13px;font-weight:600;color:var(--silver);' +
+        'letter-spacing:0.5px;">ENIGMA 主表参考</span>' +
+        '<span style="font-size:11px;color:var(--text-tertiary);' +
+        'font-style:italic;">参考数据 · 非阶段 BOM 数据 · ' + keys.length + ' 字段</span>' +
+      '</div>' +
+      '<table style="width:100%;border-collapse:collapse;">' +
+        '<tbody>' + rows + '</tbody>' +
+      '</table>' +
+    '</div>'
+  );
+}
+
+function renderDeltaDetailContent(data, fromStage, toStage) {
+  var content = document.getElementById('deltaDetailContent');
+  var bomCompare = data.bom_compare;
+  var enigmaRef = data.enigma_ref;
+
+  // 优先使用新结构 (bom_compare + enigma_ref 双区)
+  if (bomCompare || enigmaRef) {
+    var diffCount = bomCompare ? (bomCompare.diff_count || 0) : 0;
+    var fromExists = bomCompare && bomCompare.from_field_count > 0;
+    var toExists = bomCompare && bomCompare.to_field_count > 0;
+
+    var html = '';
+
+    // 差异统计条
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;' +
+      'margin-bottom:16px;padding:12px 16px;background:rgba(0,212,255,0.08);' +
+      'border:1px solid rgba(0,212,255,0.3);border-radius:8px;">' +
+      '<div style="display:flex;align-items:center;gap:10px;">' +
+      '<span style="font-size:24px;font-weight:700;color:#00d4ff;">' + diffCount + '</span>' +
+      '<span style="color:var(--text-secondary);">' +
+      getDeltaLabel('deltaDiffCount', '处 BOM 字段差异') + '</span>' +
+      '</div>' +
+      '<div style="font-size:12px;color:var(--text-secondary);">' +
+      (fromExists ? '' : (escapeHtml(fromStage) + ' 无数据 · ')) +
+      (toExists ? '' : (escapeHtml(toStage) + ' 无数据')) +
+      '</div>' +
+      '</div>';
+
+    // 区 1: BOM 原始列对比
+    html += _drillRenderBomCompare(bomCompare, fromStage, toStage);
+
+    // 区 2: ENIGMA 参考
+    html += _drillRenderEnigmaRef(enigmaRef);
+
+    // 导出按钮
+    html += '<div style="margin-top:20px;text-align:right;">' +
+      '<button class="btn-primary" style="font-size:13px;padding:6px 16px;" ' +
+      'onclick="exportDeltaDetailCSV(\'' + jsStr(data.part_number) + '\')">' +
+      getDeltaLabel('deltaExportCSV', '导出CSV') + '</button>' +
+      '</div>';
+
+    content.innerHTML = html;
+    window._deltaDetailData = data;
+    return;
+  }
+
+  // === 旧版兼容路径 (基于 comparison 字段) ===
+  var comp = data.comparison;
   if (!comp) {
     content.innerHTML = '<p style="color:var(--text-secondary);text-align:center;">无对比数据</p>';
     return;

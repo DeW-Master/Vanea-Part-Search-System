@@ -17,6 +17,7 @@ van.ea 车辆零件智能查询系统 - LLM 双引擎抽象层
 """
 
 import os
+import re
 import json
 import time
 import shutil
@@ -106,6 +107,96 @@ def query_gpu_stats():
         _GPU_CACHE['ts'] = time.time()
         _GPU_CACHE['data'] = stats
     return stats
+
+
+# ============ 请求级追踪 (多用户并发监控) ============
+# 调用方 (agent.py) 在处理一次用户搜索时, 通过 set_request_trace() 登记
+# 会话标识/查询摘要; chat() 内部每次 LLM 调用再叠加阶段标签 (意图/SQL/答案),
+# 由 _call_engine 写入在途请求登记表, 供监控面板实时展示。
+_TRACE_LOCAL = threading.local()
+
+
+def set_request_trace(session_id=None, query=None, ip=None):
+    """登记当前线程正在处理的用户请求 (会话短ID + 查询摘要 + 客户端IP)。传 None 清除。"""
+    _TRACE_LOCAL.trace = {'session_id': session_id or '',
+                          'query': (query or '')[:40],
+                          'ip': ip or ''} if (session_id or query or ip) else None
+
+
+def get_request_trace():
+    return getattr(_TRACE_LOCAL, 'trace', None)
+
+
+def _estimate_prompt_tokens(messages):
+    """粗略估算 prompt token 数 (中文按字符计, 用于算力份额加权, 非精确值)。"""
+    try:
+        total = sum(len(m.get('content') or '') for m in messages)
+    except Exception:
+        return 0
+    return total
+
+
+# vLLM 服务端指标缓存 (/metrics Prometheus 文本, 抓取廉价, 缓存 3s)
+_VLLM_METRICS_CACHE = {'ts': 0.0, 'data': None}
+_VLLM_METRICS_LOCK = threading.Lock()
+
+
+def query_vllm_server_stats():
+    """抓取 vLLM /metrics 中的服务端队列与 KV cache 指标。
+
+    返回 {available, running, waiting, kv_used_percent, kv_total_gb}。
+    vLLM 不可达 / 非 vLLM 部署时 available=False (监控面板相应区块隐藏)。
+    """
+    with _VLLM_METRICS_LOCK:
+        if time.time() - _VLLM_METRICS_CACHE['ts'] < 3.0 and _VLLM_METRICS_CACHE['data'] is not None:
+            return _VLLM_METRICS_CACHE['data']
+
+    result = {'available': False}
+    try:
+        metrics_url = VLLM_HEALTH_URL.rstrip('/health').rstrip('/') + '/metrics'
+        req = urllib.request.Request(metrics_url)
+        if VLLM_API_KEY:
+            req.add_header('Authorization', f'Bearer {VLLM_API_KEY}')
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            text = resp.read().decode('utf-8', errors='ignore')
+
+        def _grab(pattern):
+            m = re.search(pattern, text, re.M)
+            return float(m.group(1)) if m else None
+
+        running = _grab(r'^vllm:num_requests_running\{[^}]*\}\s+([\d.]+)\s*$')
+        waiting = _grab(r'^vllm:num_requests_waiting\{[^}]*\}\s+([\d.]+)\s*$')
+        # vLLM 0.6.x 起指标名为 vllm:kv_cache_usage_perc; 旧版为 vllm:gpu_cache_usage_perc
+        kv_used = _grab(r'^vllm:kv_cache_usage_perc\{[^}]*\}\s+([\d.eE+-]+)\s*$')
+        if kv_used is None:
+            kv_used = _grab(r'^vllm:gpu_cache_usage_perc\{[^}]*\}\s+([\d.eE+-]+)\s*$')
+        # KV cache 总 token 容量 (cache_config_info 标签内), 用于面板展示可容纳并发规模
+        kv_tokens = None
+        m_info = re.search(r'vllm:cache_config_info\{([^}]*)\}\s+[\d.]+\s*$', text, re.M)
+        if m_info:
+            m_tok = re.search(r'kv_cache_size_tokens="(\d+)"', m_info.group(1))
+            if m_tok:
+                kv_tokens = int(m_tok.group(1))
+        # 新版 vLLM 指标名可能不带冒号前缀, 兜底
+        if running is None:
+            running = _grab(r'^vllm_num_requests_running\{[^}]*\}\s+([\d.]+)\s*$')
+        if waiting is None:
+            waiting = _grab(r'^vllm_num_requests_waiting\{[^}]*\}\s+([\d.]+)\s*$')
+
+        result = {
+            'available': True,
+            'running': int(running or 0),
+            'waiting': int(waiting or 0),
+            'kv_cache_used_percent': round(float(kv_used) * 100, 1) if kv_used is not None else None,
+            'kv_cache_total_tokens': kv_tokens,
+        }
+    except Exception as e:
+        result = {'available': False, 'error': str(e)[:120]}
+
+    with _VLLM_METRICS_LOCK:
+        _VLLM_METRICS_CACHE['ts'] = time.time()
+        _VLLM_METRICS_CACHE['data'] = result
+    return result
 
 
 class BaseEngine:
@@ -336,6 +427,11 @@ class EngineManager:
         self._inflight = {ENGINE_OLLAMA: 0, ENGINE_VLLM: 0}
         self._inflight_lock = threading.Lock()
 
+        # 在途请求登记表 (多用户并发监控): rid -> 请求快照
+        # {rid, engine, start_time, session_id, query, stage, prompt_tokens}
+        self._inflight_requests = {}
+        self._inflight_seq = 0
+
         # 切换锁: 切换期间为写锁定, 所有 chat 请求阻塞等待 (请求不丢失)
         self._switch_lock = threading.RLock()
         self._switching = False
@@ -430,12 +526,14 @@ class EngineManager:
         return result
 
     # ---------- 核心: 对话调用 (含故障转移) ----------
-    def chat(self, messages, system_prompt=None, temperature=0.3):
+    def chat(self, messages, system_prompt=None, temperature=0.3, stage=None):
         """
         对外统一对话接口。
         - 切换期间: 在条件变量上等待, 直到切换完成 (请求不丢失)
         - 首选引擎: 优先调用; 失败则自动故障转移到备用引擎
         - 全程记录在途计数 / 指标 / 日志
+        - stage: 调用阶段标签 (如 '意图识别'/'SQL 生成'/'答案合成'), 仅用于监控展示;
+          会话标识与查询摘要由 set_request_trace() 经线程上下文透传
         """
         # 1. 等待切换完成 (新请求排队, 不拒绝不丢失)
         with self._switch_condition:
@@ -460,7 +558,8 @@ class EngineManager:
             if eng_name != self.preferred and not self._healthy.get(eng_name, False):
                 continue
             try:
-                return self._call_engine(eng, messages, system_prompt, temperature)
+                return self._call_engine(eng, messages, system_prompt, temperature,
+                                         stage=stage)
             except Exception as e:
                 last_err = e
                 _log(f"引擎 {eng_name} 调用失败: {e}")
@@ -475,11 +574,25 @@ class EngineManager:
 
         raise RuntimeError(f"所有 LLM 引擎均不可用: {last_err}")
 
-    def _call_engine(self, engine, messages, system_prompt, temperature):
-        """在指定引擎上执行一次调用, 维护在途计数与指标。"""
+    def _call_engine(self, engine, messages, system_prompt, temperature, stage=None):
+        """在指定引擎上执行一次调用, 维护在途计数、请求登记表与指标。"""
         eng_name = engine.name
+        trace = get_request_trace() or {}
+        rid = None
         with self._inflight_lock:
             self._inflight[eng_name] += 1
+            self._inflight_seq += 1
+            rid = self._inflight_seq
+            self._inflight_requests[rid] = {
+                'rid': rid,
+                'engine': eng_name,
+                'stage': stage or 'LLM 调用',
+                'session_id': trace.get('session_id', ''),
+                'ip': trace.get('ip', ''),
+                'query': trace.get('query', ''),
+                'prompt_chars': _estimate_prompt_tokens(messages),
+                'start_time': time.time(),
+            }
             if _metrics:
                 _metrics.set_llm_inflight(eng_name, self._inflight[eng_name])
         t0 = time.time()
@@ -503,6 +616,7 @@ class EngineManager:
             dur = time.time() - t0
             with self._inflight_lock:
                 self._inflight[eng_name] = max(0, self._inflight[eng_name] - 1)
+                self._inflight_requests.pop(rid, None)
                 if _metrics:
                     _metrics.set_llm_inflight(eng_name, self._inflight[eng_name])
             model = getattr(engine, 'model', None) or OLLAMA_MODEL
@@ -789,6 +903,30 @@ class EngineManager:
         any_healthy = any(e['healthy'] for e in engines.values())
         with self._recovery_lock:
             recovery = dict(self._vllm_recovery)
+
+        # 在途请求快照 (多用户并发监控): 附已耗时与算力份额估算
+        now = time.time()
+        with self._inflight_lock:
+            inflight = list(self._inflight_requests.values())
+        total_chars = sum(r.get('prompt_chars', 0) for r in inflight) or 1
+        requests = []
+        for r in sorted(inflight, key=lambda x: x['start_time']):
+            chars = r.get('prompt_chars', 0)
+            requests.append({
+                'rid': r['rid'],
+                'engine': r['engine'],
+                'stage': r['stage'],
+                'session_id': r.get('session_id', ''),
+                'ip': r.get('ip', ''),
+                'query': r.get('query', ''),
+                'prompt_chars': chars,
+                'elapsed_seconds': round(now - r['start_time'], 1),
+                # 算力份额估算: vLLM 连续批处理下算力由在途请求共享, 无法精确拆分,
+                # 按各请求 prompt 规模加权给出参考占比
+                'compute_share_percent': round(100.0 * chars / total_chars, 1)
+                if inflight else 0.0,
+            })
+
         return {
             'preferred': self.preferred,
             'active': self.active if any_healthy else 'rule',
@@ -797,6 +935,11 @@ class EngineManager:
             'fallback_mode': 'rule' if not any_healthy else 'llm',
             'engines': engines,
             'gpu': query_gpu_stats(),
+            # vLLM 服务端队列/KV cache 指标 (不可用时 available=False)
+            'vllm_server': query_vllm_server_stats(),
+            # 在途 LLM 调用实时清单
+            'inflight_requests': requests,
+            'inflight_total': len(requests),
             'vllm_recovery': recovery,
             'registered_models': self.list_registered_models(),
             'switch_history': list(reversed(self.switch_history[:10])),

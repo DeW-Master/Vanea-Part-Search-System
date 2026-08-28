@@ -401,18 +401,35 @@ def serialize_value(val):
     return str(val)
 
 
+def normalize_header(header):
+    """表头规范化: 小写 + 去首尾空白 + 分隔符(. _ /)与多空格统一为单空格 + 去问号。
+    用于跨语言/跨导出格式的表头比对 (例如 ZGS_DiaE == ZGS DiaE,
+    'SoMA.Soma in ZEUS ?' 与 'soma in zeus' 视为同一列)。"""
+    s = (header or '').strip().lower()
+    s = s.replace('?', ' ')
+    s = re.sub(r'[._/]+', ' ', s)
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s
+
+
+# 规范化后"精确相等"即判定为 Part Number 列 (避免 'part' 子串误伤 'part name' 等)
+_PART_NUMBER_EXACT = {'part', 'pn', 'p n', 'sachnummer', 'part number'}
+
+
 def is_part_number_header(header):
     """检查是否是Part Number列"""
     h_lower = header.lower().strip()
     for pn in PART_NUMBER_HEADERS:
         if pn in h_lower:
             return True
+    if normalize_header(header) in _PART_NUMBER_EXACT:
+        return True
     return False
 
 
 def header_similarity(h1, h2):
-    """计算两个表头的相似度"""
-    return SequenceMatcher(None, h1.lower().strip(), h2.lower().strip()).ratio()
+    """计算两个表头的相似度 (基于规范化后的表头, 忽略大小写/分隔符差异)"""
+    return SequenceMatcher(None, normalize_header(h1), normalize_header(h2)).ratio()
 
 
 def suggest_english_name(original_header):
@@ -523,11 +540,33 @@ def suggest_english_name(original_header):
         'responsible requester is qe': 'Responsible Requester is QE',
         'row labels': 'Row Labels',
         'soMA.FAV-SD': 'SOMA FAV SD',
+        # —— 2026-08 ENIGMA / SOMA 导出补充 (键以原始表头小写给出, 查找时按规范化兜底) ——
+        'zgs_diae': 'ZGS DiaE',
+        'part': 'Part Number',          # BOM 表仅一列 'Part' 即零件号
+        'ec': 'EC Number',
+        'ec_number': 'EC Number',
+        'ec number': 'EC Number',
+        # SOMA in ZEUS: 新导出为 'SoMA.Soma in ZEUS ?', 规范化后命中
+        'soma.soma in zeus ?': 'SOMA in ZEUS',
+        'soma.soma in zeus': 'SOMA in ZEUS',
+        'soma.status': 'SOMA Status',
+        'soma.fav nr.': 'SOMA FAV Number',
+        'soma.prio': 'SOMA Priority',
     }
 
+    # 1) 原始小写精确匹配 (保留对历史 'result.xxx' / 'xxx.yyy' 键的兼容)
     h_lower = h.lower()
     if h_lower in known_mappings:
         return known_mappings[h_lower]
+
+    # 2) 规范化后匹配: 消除大小写/分隔符/问号/前缀差异, 避免同义表头被判为新列
+    _normalized_cache = getattr(suggest_english_name, '_norm_cache', None)
+    if _normalized_cache is None:
+        _normalized_cache = {normalize_header(k): v for k, v in known_mappings.items()}
+        suggest_english_name._norm_cache = _normalized_cache
+    h_norm = normalize_header(h)
+    if h_norm in _normalized_cache:
+        return _normalized_cache[h_norm]
 
     # 如果已经是英文，直接返回
     if re.match(r'^[A-Za-z][A-Za-z0-9\s\-\._/]*$', h):
@@ -622,7 +661,8 @@ class DatabaseManager:
         返回: {matched: [...], unmatched: [...]}
         """
         existing_cols = self.get_existing_columns()
-        existing_names = {col['english_name'].lower(): col for col in existing_cols}
+        # 规范化键 (小写/分隔符/问号归一) 建索引, 使 ZGS_DiaE==ZGS DiaE 等变体命中同一列
+        existing_names = {normalize_header(col['english_name']): col for col in existing_cols}
 
         matched = []
         unmatched = []
@@ -633,11 +673,10 @@ class DatabaseManager:
 
             h_lower = header.lower().strip()
             eng_name = suggest_english_name(header)
-            eng_lower = eng_name.lower()
 
-            # 1. 精确匹配现有列
-            if eng_lower in existing_names:
-                col = existing_names[eng_lower]
+            # 1. 精确匹配现有列 (规范化比较, 忽略大小写/分隔符差异)
+            if normalize_header(eng_name) in existing_names:
+                col = existing_names[normalize_header(eng_name)]
                 matched.append({
                     'original_header': header,
                     'unified_column_id': col['id'],
@@ -714,16 +753,25 @@ class DatabaseManager:
                 )
                 file_id = cursor.lastrowid
 
+                # 现有统一列的规范化索引: 规范化 english_name -> canonical english_name
+                existing_unified = {}
+                for _r in conn.execute('SELECT english_name FROM unified_columns').fetchall():
+                    existing_unified[normalize_header(_r['english_name'])] = _r['english_name']
+
                 # 处理映射：创建统一列 + 列映射
                 header_to_unified = {}
                 for m in mappings:
                     orig = m['original_header']
-                    unified_name = m.get('unified_name') or m.get('suggested_english') or orig
+                    raw_unified = (m.get('unified_name') or m.get('suggested_english') or orig or '').strip()
                     action = m.get('action', 'mapped')
 
-                    if action == 'skip':
+                    if action == 'skip' or not raw_unified:
                         header_to_unified[orig] = None
                         continue
+
+                    # 规范化兜底: 若建议/提交名规范化后与某现有列相同, 归一到该列规范名
+                    # (防止 ZGS_DiaE 与 ZGS DiaE、大小写/前后缀差异导致重复建列)
+                    unified_name = existing_unified.get(normalize_header(raw_unified), raw_unified)
 
                     # 检查统一列是否已存在
                     col_row = conn.execute(
@@ -760,6 +808,7 @@ class DatabaseManager:
                             (unified_name, display, json.dumps([orig]), is_pn, datetime.now().isoformat())
                         )
                         col_id = cursor2.lastrowid
+                        existing_unified[normalize_header(unified_name)] = unified_name
 
                     # 创建列映射记录
                     conn.execute(
@@ -1838,14 +1887,14 @@ class DatabaseManager:
                 d = json.loads(r['data'])
             except Exception:
                 d = {}
-            # 富化: BOM 数据优先 (zgs/part number 来自 BOM), ENIGMA 填空业务字段
-            enr = enigma_map.get(pn, {})
-            for k, v in enr.items():
-                if d.get(k) in (None, ''):
-                    d[k] = v
+            # Part.data 只保留 BOM 原始列，不做 ENIGMA 富化
+            # ENIGMA 数据独立挂在 Part.enigma_record / enigma_values (用于 KPI 统计 / 参考展示)
+            # 阶段对比严格基于真实 data，避免外部数据"脑补"产生假差异
+            enr_record = enigma_map.get(pn)
             catalog.add(Part.from_row(
                 r['id'], r['file_id'], pn, d,
                 stage=stage, enigma_values=enigma_index.get(pn),
+                enigma_record=dict(enr_record) if enr_record else None,
             ))
         return catalog
 
@@ -1892,8 +1941,9 @@ class DatabaseManager:
         # 构建完整的 delta 对象（含字段级变化详情，用于下钻展示）
         deltas = []
         for pair in delta_pairs:
-            delta = self._build_delta_from_pair(pair, DELTA_FIELD_CONFIG, col_names)
+            delta = self._build_delta_from_pair(pair, DELTA_FIELD_CONFIG, col_names, enigma_map)
             to_part = pair.to_part
+            from_part = pair.from_part
             # EC 检测：检查后阶段 PN 在 ENIGMA 记录中是否存在 EC
             ec_value = to_part.ec if to_part else ''
             delta['has_ec'] = bool(ec_value)
@@ -1903,6 +1953,16 @@ class DatabaseManager:
             delta['has_zeus'] = bool(fav_value)
             delta['zeus_updated'] = bool(ec_value and fav_value)
             delta['fav_value'] = fav_value
+            # SOMA (来自 ENIGMA 多值索引，作为摘要标签用)
+            soma_set = to_part.soma_values if to_part else set()
+            delta['soma_values'] = sorted(soma_set)
+            delta['soma_ja'] = to_part.soma_ja if to_part else False
+            # KEM (来自 ENIGMA 多值索引，用于 KPI 过滤)
+            kem_set = to_part.kem_values if to_part else set()
+            delta['kem_values'] = sorted(kem_set)
+            # 前阶段状态（用于 ec_added / zeus_updated 等增量统计）
+            delta['from_has_ec'] = bool(from_part.ec) if from_part else False
+            delta['from_has_zeus'] = bool(from_part.fav) if from_part else False
             deltas.append(delta)
 
         # 6. 排序：ZGS升级优先，然后新增，最后停用
@@ -1938,17 +1998,59 @@ class DatabaseManager:
             "to_stage": to_stage,
         }
 
-    def _build_delta_from_pair(self, pair, field_config, col_names):
-        """由 DeltaPair 构建单个零件的 Delta dict (API 形状保持不变)。"""
+    def _build_delta_from_pair(self, pair, field_config, col_names, enigma_map=None):
+        """由 DeltaPair 构建单个零件的 Delta dict (API 形状保持不变)。
+
+        数据严格分离:
+        - bom_compare: BOM 原始字段的逐字段对比 (Part.compare, 零 hardcoding)
+        - enigma_ref: ENIGMA 主表参考记录 (仅展示参考, 不参与阶段对比)
+        """
         changes = [c.to_dict() for c in Part.diff_parts(
             pair.from_part, pair.to_part, field_config, col_names)]
 
-        # enigma数据（完整记录信息，用于下钻查看详情）
+        # BOM 原始字段对比 (Part.compare，只对比真实存在的字段)
+        if pair.from_part and pair.to_part:
+            bom_compare = pair.from_part.compare(pair.to_part)
+        elif pair.from_part:
+            bom_compare = {
+                "from_field_count": len(pair.from_part.data or {}),
+                "to_field_count": 0,
+                "common": [],
+                "only_in_from": [
+                    {"field": k, "value": v if v is not None else ''}
+                    for k, v in sorted((pair.from_part.data or {}).items())
+                ],
+                "only_in_to": [],
+                "diff_count": len(pair.from_part.data or {}),
+            }
+        elif pair.to_part:
+            bom_compare = {
+                "from_field_count": 0,
+                "to_field_count": len(pair.to_part.data or {}),
+                "common": [],
+                "only_in_from": [],
+                "only_in_to": [
+                    {"field": k, "value": v if v is not None else ''}
+                    for k, v in sorted((pair.to_part.data or {}).items())
+                ],
+                "diff_count": len(pair.to_part.data or {}),
+            }
+        else:
+            bom_compare = None
+
+        # ENIGMA 参考记录 (独立区域展示，不混入 BOM 数据)
+        enigma_ref = {}
+        if enigma_map is not None:
+            ref = enigma_map.get(pair.pn)
+            if ref:
+                enigma_ref["record"] = dict(ref)
+
+        # 兼容旧字段: enigma 保留，但内容为 BOM 原始数据 (不再是富化后的)
         enigma = {}
         if pair.from_part:
-            enigma['from_record'] = pair.from_part.data
+            enigma['from_record'] = dict(pair.from_part.data) if pair.from_part.data else {}
         if pair.to_part:
-            enigma['to_record'] = pair.to_part.data
+            enigma['to_record'] = dict(pair.to_part.data) if pair.to_part.data else {}
 
         return {
             "part_number": pair.pn,
@@ -1956,12 +2058,17 @@ class DatabaseManager:
             "changes": changes,
             "has_changes": True,
             "enigma": enigma,
+            "bom_compare": bom_compare,
+            "enigma_ref": enigma_ref,
             "record_id_old": pair.from_part.row_id if pair.from_part else None,
             "record_id_new": pair.to_part.row_id if pair.to_part else None,
         }
 
     def get_delta_detail(self, part_number, from_stage=None, to_stage=None):
-        """获取Delta详情（下钻数据）：两阶段并排对比，高亮差异字段。
+        """获取 Delta 详情（下钻数据）：BOM 原始列逐字段对比 + ENIGMA 参考数据。
+
+        对比零 hardcoding: 使用 Part.compare() 只对比两个阶段 BOM data 中真实存在的字段。
+        ENIGMA 数据作为参考单独返回，不参与 BOM 对比。
 
         参数:
             part_number: 零件号
@@ -1969,116 +2076,131 @@ class DatabaseManager:
             to_stage: 后阶段 (pre-TO/TO1/TO2)，可选
 
         返回:
-            两阶段数据对比，标记差异字段
+            两阶段 BOM 对比 + ENIGMA 参考
         """
-        from config import DELTA_FIELD_CONFIG
-
         conn = get_db()
-        rows = conn.execute(
-            "SELECT pd.id, pd.file_id, pd.part_number, pd.data, uf.stage, uf.file_type "
-            "FROM parts_data pd "
-            "JOIN uploaded_files uf ON uf.id = pd.file_id "
-            "WHERE pd.part_number = ? ORDER BY pd.id",
-            [part_number]
-        ).fetchall()
         all_cols = [r['english_name'] for r in conn.execute(
             'SELECT english_name, display_name FROM unified_columns').fetchall()]
+
+        enigma_map = self._load_enigma_enrichment(conn)
+        enigma_index = self._load_enigma_value_index(conn)
+
+        # 用 Part.compare 做纯 BOM 字段对比
+        bom_compare = None
+        enigma_ref = None
+        stages_available = []
+        from_part = None
+        to_part = None
+        norm_pn = norm(part_number)
+
+        if from_stage and to_stage:
+            from_cat = self._build_stage_catalog(
+                conn, from_stage, part_number=part_number,
+                enigma_map=enigma_map, enigma_index=enigma_index)
+            to_cat = self._build_stage_catalog(
+                conn, to_stage, part_number=part_number,
+                enigma_map=enigma_map, enigma_index=enigma_index)
+            from_part = from_cat.get(norm_pn)
+            to_part = to_cat.get(norm_pn)
+            if from_part:
+                stages_available.append(from_stage)
+            if to_part:
+                stages_available.append(to_stage)
+            if from_part and to_part:
+                bom_compare = from_part.compare(to_part)
+            elif to_part:
+                # 只在 to 存在
+                bom_compare = {
+                    'from_field_count': 0,
+                    'to_field_count': len(to_part.data),
+                    'common': [],
+                    'only_in_from': [],
+                    'only_in_to': [{'field': k, 'to_value': v}
+                                   for k, v in sorted(to_part.data.items())],
+                    'diff_count': len(to_part.data),
+                }
+            elif from_part:
+                bom_compare = {
+                    'from_field_count': len(from_part.data),
+                    'to_field_count': 0,
+                    'common': [],
+                    'only_in_from': [{'field': k, 'from_value': v}
+                                     for k, v in sorted(from_part.data.items())],
+                    'only_in_to': [],
+                    'diff_count': len(from_part.data),
+                }
+
+        # ENIGMA 参考记录 (按 PN, 与阶段无关)
+        if norm_pn in enigma_map:
+            enigma_ref = dict(enigma_map[norm_pn])
+
         conn.close()
 
-        if not rows:
-            return {"error": "Part not found"}
-
-        # 按阶段分组 (BOM 文件才有 stage; supplementary 行归入对应 file_id 的 stage=None)
-        stage_data = {}  # stage_name -> {file_id, data}
-        for r in rows:
-            data = json.loads(r['data'])
-            matched_stage = r['stage'] if r['stage'] else None
-            if not matched_stage:
-                continue
-            # 同一阶段只保留一条（取最新的）
-            stage_data[matched_stage] = {
-                'file_id': r['file_id'],
-                'data': data,
-            }
-
-        # 如果指定了阶段，构建对比
+        # 为了兼容旧前端, 保留 comparison 字段 (基于 BOM data, 不含 ENIGMA 富化)
+        # 新前端优先用 bom_compare + enigma_ref
         comparison = None
-        if from_stage and to_stage:
-            from_data = stage_data.get(from_stage, {}).get('data', {})
-            to_data = stage_data.get(to_stage, {}).get('data', {})
-
-            fields = []
-            for cfg in DELTA_FIELD_CONFIG:
-                field_name = cfg['field']
-                # 尝试用不同的大小写匹配字段
-                from_val = None
-                to_val = None
-                for col in all_cols:
-                    if col.lower().replace('_', ' ').replace('  ', ' ') == field_name.lower().replace('_', ' '):
-                        from_val = from_data.get(col)
-                        to_val = to_data.get(col)
-                        field_display = col
-                        break
-                else:
-                    # 直接查找
-                    from_val = from_data.get(field_name)
-                    to_val = to_data.get(field_name)
-                    field_display = field_name
-
-                change_type = determine_change_type(cfg.get('key') or '', from_val, to_val)
-
-                fields.append({
-                    'business': cfg['business'],
-                    'field': field_display,
-                    'from_value': from_val or '',
-                    'to_value': to_val or '',
-                    'change_type': change_type,
-                    'is_different': change_type not in ['unchanged', 'persisted', 'unavailable'],
-                    'priority': cfg['priority'],
+        if bom_compare:
+            from_exists = from_part is not None
+            to_exists = to_part is not None
+            comp_fields = []
+            # common 字段
+            for item in bom_compare.get('common', []):
+                is_diff = item.get('is_different', False)
+                comp_fields.append({
+                    'business': item['field'],
+                    'field': item['field'],
+                    'from_value': item.get('from_value', '') or '',
+                    'to_value': item.get('to_value', '') or '',
+                    'change_type': 'changed' if is_diff else 'unchanged',
+                    'is_different': is_diff,
+                    'priority': 1,
                 })
-
-            # 额外补充字段（数据库中存在但不在DELTA_FIELD_CONFIG中的）
-            extra_fields = []
-            all_keys = set(from_data.keys()) | set(to_data.keys())
-            config_fields_lower = {cfg['field'].lower().replace('_', ' ') for cfg in DELTA_FIELD_CONFIG}
-            for key in sorted(all_keys):
-                key_norm = key.lower().replace('_', ' ')
-                if key_norm in config_fields_lower:
-                    continue
-                if key in ['Part Number', 'part_number', 'id']:
-                    continue
-                from_val = from_data.get(key, '')
-                to_val = to_data.get(key, '')
-                is_diff = (from_val or '') != (to_val or '')
-                if is_diff:  # 只展示有差异的额外字段
-                    extra_fields.append({
-                        'business': key,
-                        'field': key,
-                        'from_value': from_val or '',
-                        'to_value': to_val or '',
-                        'change_type': 'changed' if is_diff else 'unchanged',
-                        'is_different': is_diff,
-                        'priority': 99,
-                    })
-
+            # 仅 from
+            for item in bom_compare.get('only_in_from', []):
+                comp_fields.append({
+                    'business': item['field'],
+                    'field': item['field'],
+                    'from_value': item.get('from_value', '') or '',
+                    'to_value': '',
+                    'change_type': 'removed',
+                    'is_different': True,
+                    'priority': 2,
+                })
+            # 仅 to
+            for item in bom_compare.get('only_in_to', []):
+                comp_fields.append({
+                    'business': item['field'],
+                    'field': item['field'],
+                    'from_value': '',
+                    'to_value': item.get('to_value', '') or '',
+                    'change_type': 'added',
+                    'is_different': True,
+                    'priority': 2,
+                })
             comparison = {
                 'from_stage': from_stage,
                 'to_stage': to_stage,
-                'from_exists': from_stage in stage_data,
-                'to_exists': to_stage in stage_data,
-                'fields': fields,
-                'extra_fields': extra_fields,
-                'total_differences': sum(1 for f in fields if f['is_different']) + len(extra_fields),
+                'from_exists': from_exists,
+                'to_exists': to_exists,
+                'fields': comp_fields,
+                'extra_fields': [],
+                'total_differences': bom_compare.get('diff_count', 0),
             }
+
+        all_records = []
+        if from_part:
+            all_records.append({'stage': from_stage, 'data': dict(from_part.data)})
+        if to_part:
+            all_records.append({'stage': to_stage, 'data': dict(to_part.data)})
 
         return {
             "part_number": part_number,
-            "stages_available": list(stage_data.keys()),
-            "comparison": comparison,
+            "stages_available": stages_available,
+            "comparison": comparison,  # 兼容旧前端
+            "bom_compare": bom_compare,  # 新结构: 纯 BOM 字段对比
+            "enigma_ref": enigma_ref,    # 新结构: ENIGMA 参考记录
             "all_columns": all_cols,
-            "all_records": [
-                {"stage": s, "data": d['data']} for s, d in stage_data.items()
-            ],
+            "all_records": all_records,
         }
 
     def _compute_kpi_from_delta_pairs(self, delta_pairs):
@@ -2174,11 +2296,28 @@ class DatabaseManager:
         # === 4. 柱状折线图数据 ===
         # 以 PN 对齐: 每个阶段统计该阶段 BOM 内所有 PN 关联的去重 EC
         # (Bundle Number) 数量与 ZEUS/FAV 数量 (ec_count/fav_count)。
+        # 注意: bar_line 走 enigma_map (同 PN 合并为单条记录),
+        # 与旧版 SQL 统计富化后 parts_data 的口径一致 (KPI 数值不变)。
+        from config import DELTA_BUSINESS_FIELDS
+        ec_col = DELTA_BUSINESS_FIELDS['ec']
+        fav_col = DELTA_BUSINESS_FIELDS['fav']
         stages_order = ['pre-TO', 'TO1', 'TO2']
+
+        def _bar_unique_vals(stage, col_name):
+            vals = set()
+            for pn in catalogs[stage].pns:
+                rec = enigma_map.get(pn)
+                if not rec:
+                    continue
+                v = rec.get(col_name)
+                if v not in (None, ''):
+                    vals.add(v)
+            return len(vals)
+
         bar_line = {
             'stages': stages_order,
-            'ec_counts': [stage_stats[s]['ec_count'] for s in stages_order],
-            'fav_counts': [stage_stats[s]['fav_count'] for s in stages_order],
+            'ec_counts': [_bar_unique_vals(s, ec_col) for s in stages_order],
+            'fav_counts': [_bar_unique_vals(s, fav_col) for s in stages_order],
         }
 
         conn.close()
@@ -2219,9 +2358,9 @@ class DatabaseManager:
                 summary['new_parts'] += 1
             elif d['match_type'] == 'discontinued_part':
                 summary['discontinued_parts'] += 1
-            for c in d['changes']:
-                if c['business'] == 'EC' and c['change_type'] == 'added':
-                    summary['ec_added'] += 1
+            # EC 新增: 前阶段没有 EC，后阶段有 EC（PN 新增也算"从无到有"）
+            if d.get('has_ec') and not d.get('from_has_ec'):
+                summary['ec_added'] += 1
             if d.get('has_ec'):
                 summary['has_ec'] += 1
             if d.get('zeus_updated'):

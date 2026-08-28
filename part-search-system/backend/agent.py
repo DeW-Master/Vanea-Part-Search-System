@@ -72,11 +72,11 @@ class EngineChatAdapter:
         except Exception:
             return False
 
-    def chat(self, messages, system_prompt=None, temperature=0.3):
+    def chat(self, messages, system_prompt=None, temperature=0.3, stage=None):
         if self.em is None:
             raise RuntimeError("LLM 引擎管理器不可用")
         return self.em.chat(messages, system_prompt=system_prompt,
-                            temperature=temperature)
+                            temperature=temperature, stage=stage)
 
 
 # ============ 配置 ============
@@ -742,8 +742,11 @@ class OllamaAgent:
         with urllib.request.urlopen(req, timeout=60) as resp:
             return json.loads(resp.read()).get('response', '')
 
-    def chat(self, messages, system_prompt=None, temperature=0.3):
-        """多轮对话接口 (messages: [{role, content}])。"""
+    def chat(self, messages, system_prompt=None, temperature=0.3, stage=None):
+        """多轮对话接口 (messages: [{role, content}])。
+
+        stage: 调用阶段标签, 仅双引擎管理器用于监控展示; Ollama 直连路径忽略。
+        """
         payload = {"model": self.model, "stream": False,
                    "options": {"temperature": temperature}}
         msgs = list(messages or [])
@@ -1081,8 +1084,8 @@ class CloudAgent:
             data = json.loads(resp.read())
             return data['choices'][0]['message']['content']
 
-    def chat(self, messages, system_prompt=None, temperature=0.3):
-        """多轮对话接口 (messages: [{role, content}])。"""
+    def chat(self, messages, system_prompt=None, temperature=0.3, stage=None):
+        """多轮对话接口 (messages: [{role, content}])。stage 仅用于接口签名兼容。"""
         api_url = _cloud_config.get('api_url', '').rstrip('/')
         api_key = _cloud_config.get('api_key', '')
         model = _cloud_config.get('model', '')
@@ -1240,14 +1243,36 @@ class AgentManager:
             return None
         return em.status()
 
-    def process_query(self, user_query, lang='zh', history=None):
+    def process_query(self, user_query, lang='zh', history=None, session_id=None, ip=None):
         """处理用户查询。
         优先由 LLM 进行语义理解 + NL2SQL；仅在无可用 LLM 时回退到规则模式。
         history: [{'role': 'user'|'agent', 'content': str}, ...] 用于多轮上下文。
+        session_id: 前端并发会话 ID, 用于多用户 GPU 监控面板归因 (可选)。
+        ip: 客户端 IP, 用于在途监控归因与按用户搜索日志 (可选)。
         """
         set_language(lang)
         history = history or []
 
+        # 登记请求追踪上下文 (本线程内的 LLM 调用都会带上会话/查询/IP 标签)
+        trace_set = False
+        try:
+            from llm_engine import set_request_trace
+            set_request_trace(session_id=session_id, query=user_query, ip=ip)
+            trace_set = True
+        except Exception:
+            pass
+        try:
+            return self._process_query_inner(user_query, history)
+        finally:
+            if trace_set:
+                try:
+                    from llm_engine import set_request_trace as _clear
+                    _clear(None)
+                except Exception:
+                    pass
+
+    def _process_query_inner(self, user_query, history):
+        """process_query 的实际逻辑 (请求追踪上下文已由外层设置)。"""
         # 1. 对比意图保留专用 UI（前端有对比结果渲染）
         compare_intent = detect_compare_intent(user_query)
         if compare_intent:
@@ -1412,7 +1437,8 @@ class AgentManager:
                              'content': content[:1500]})
         messages.append({'role': 'user', 'content': user_query})
 
-        raw = active_agent.chat(messages, system_prompt=system_prompt, temperature=0.1)
+        raw = active_agent.chat(messages, system_prompt=system_prompt, temperature=0.1,
+                                stage='SQL 生成')
         plan = self._extract_json(raw)
         if not isinstance(plan, dict):
             print(f"[Agent] NL2SQL JSON parse failed: {raw[:300]}")
@@ -1490,7 +1516,8 @@ class AgentManager:
         answer_messages.append({'role': 'user', 'content': prompt})
         try:
             ans = active_agent.chat(answer_messages,
-                                    system_prompt=answer_sys, temperature=0.4).strip()
+                                    system_prompt=answer_sys, temperature=0.4,
+                                    stage='答案合成').strip()
             if ans:
                 return ans
         except Exception as e:

@@ -60,6 +60,7 @@ data/*.db-shm
 data/cloud_config.json
 data/llm_engine.json
 data/uploads/
+data/user_logs/
 *.db
 *.sqlite
 *.sqlite3

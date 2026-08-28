@@ -33,9 +33,13 @@ part-search-system/
 │
 ├── backend/                Python 后端
 │   ├── app.py              Flask 主应用
-│   ├── config.py           配置文件
+│   ├── config.py           配置文件 + 版本历史
 │   ├── database.py         数据库层 + Delta 计算
 │   ├── agent.py            AI 智能体
+│   ├── llm_engine.py       LLM 引擎 (vLLM/Ollama 双引擎)
+│   ├── user_log.py         用户操作日志
+│   ├── models/             领域模型 (Part / Catalog)
+│   ├── tests/              单元测试
 │   └── requirements.txt    Python 依赖
 │
 ├── frontend/               前端静态文件
@@ -67,10 +71,11 @@ part-search-system/
 |------|------|------|
 | 🏠 Homepage Dashboard | Delta 总览：5 KPI + 双漏斗图 + 双饼图 + 趋势图 | ✅ |
 | 🔍 零件搜索 | PN模糊搜索 / 字段搜索 / 复杂条件 / 导出 | ✅ |
-| 📊 阶段 Delta | pre-TO/TO1/TO2 三阶段 PN+ZGS 组合对比 | ✅ |
+| 📊 阶段 Delta | pre-TO/TO1/TO2 三阶段 PN+ZGS 组合对比 · 双区下钻 (BOM原始列 + ENIGMA参考) | ✅ |
+| 🔬 Part.compare() | 零 hardcoding 逐字段对比，支持任意两阶段 BOM 数据对比 | ✅ |
 | 🤖 F-Brain 智能体 | 规则引擎 + Ollama + 云端 API 三层架构 | ✅ |
-| ⚙️ 管理后台 | 数据导入 / 列配置 / 云端配置 / 缓存管理 | ✅ |
-| 📈 监控页面 | 并发用户 / 查询统计 / 系统状态 | ✅ |
+| ⚙️ 管理后台 | 数据导入 / 列配置 / 云端配置 / 缓存管理 / 实时监控 | ✅ |
+| 📈 实时监控 | 在途调用 9 列 · 用户日志 · 系统状态 (admin 专属) | ✅ |
 
 **多语言**: 中文 / English / Deutsch 三语切换
 
@@ -93,6 +98,18 @@ part-search-system/
 - **pre-TO**: 不含 PRO1 也不含 PRO2
 - **TO1**: 包含 PRO1
 - **TO2**: 包含 PRO2
+
+### 数据分层（ENIGMA vs BOM）
+各阶段 BOM 数据保持纯粹，不被外部数据富化。ENIGMA 数据通过三层结构独立管理：
+
+| 层级 | 载体 | 用途 |
+|------|------|------|
+| Part.data | BOM 原始列 | 阶段对比 / 下钻展示 |
+| Part.enigma_record | ENIGMA 主表单条记录 | KPI 统计二级回退 / 参考展示 |
+| Part.enigma_values | ENIGMA 多值索引 (ec/kem/fav/soma) | 去重统计 / 三级回退 |
+
+`Part.compare()` 仅对比 `data` 层，保证零 hardcoding 且对比结果纯粹。
+`Part.value()` 三级回退：`data → enigma_record → enigma_values`，保证 KPI 统计口径不变。
 
 ---
 
@@ -145,13 +162,16 @@ part-search-system/
 
 ## 关键优化
 
+- ✅ **Part.compare() 零 hardcoding**: 纯字段逐字段对比，支持任意两阶段 / 任意 BOM 结构
+- ✅ **数据分层架构**: BOM 原始数据与 ENIGMA 参考数据严格分离，下钻双区展示
 - ✅ **多副本部署**: 支持 Docker Swarm / k8s 多实例部署，Redis 统一 Session
 - ✅ **Ollama 负载均衡**: 多节点轮询 + 自动故障转移
-- ✅ **全方位监控**: 集成 Prometheus 指标端点
+- ✅ **全方位监控**: 集成 Prometheus 指标端点 + admin 专属实时监控页
 - ✅ **数据库**: 双引擎支持（SQLite 默认 / PostgreSQL 可选）
 - ✅ **Nginx 反向代理**: 静态文件加速 + 负载均衡配置
 - ✅ **性能加速**: Redis 缓存层 + Delta 预计算后台线程
 - ✅ **安全性**: 移除前端版本号显示，采用 build 日志追溯
+- ✅ **用户审计**: JSONL 格式按 IP 分文件日志，支持查询历史与错误追溯
 
 ---
 

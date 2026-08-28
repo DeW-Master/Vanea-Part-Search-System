@@ -815,77 +815,6 @@
     .new-chat-btn:hover { border-color: var(--silver-dark); color: var(--text); background: var(--bg-alt); }
     .new-chat-btn svg { width: 14px; height: 14px; }
 
-    /* ---------- LLM 双引擎切换器 ---------- */
-    .engine-switcher {
-      display: inline-flex; align-items: center; gap: 2px;
-      padding: 2px; border: 1px solid var(--border-bright);
-      border-radius: var(--radius-sm); background: var(--bg-alt);
-    }
-    .engine-btn {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 4px 12px; border: none; background: transparent;
-      color: var(--text-light); font-size: 12px; font-weight: 600;
-      cursor: pointer; font-family: inherit; border-radius: calc(var(--radius-sm) - 1px);
-      transition: all 0.15s;
-    }
-    .engine-btn:hover { color: var(--text); background: var(--card-bg); }
-    .engine-btn.active {
-      background: var(--card-bg); color: var(--text);
-      box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-    }
-    .engine-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .engine-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--text-light); flex-shrink: 0;
-    }
-    .engine-dot.healthy { background: var(--success); box-shadow: 0 0 0 2px var(--success-light); }
-    .engine-dot.unhealthy { background: var(--danger, #e5484d); box-shadow: 0 0 0 2px rgba(229,72,77,0.15); }
-    .engine-dot.switching { background: var(--warning); animation: engine-pulse 1s infinite; }
-    @keyframes engine-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
-    /* 超时分级提示横幅 */
-    .agent-timeout-banner {
-      display: none; align-items: center; gap: 8px;
-      margin: 0 16px 8px; padding: 8px 14px;
-      border-radius: var(--radius-sm); font-size: 12px; font-weight: 500;
-      border: 1px solid var(--warning); background: var(--warning-light); color: var(--warning);
-    }
-    .agent-timeout-banner.show { display: flex; }
-    .agent-timeout-banner.critical { border-color: var(--danger, #e5484d); background: rgba(229,72,77,0.1); color: var(--danger, #e5484d); }
-    .agent-timeout-banner svg { width: 15px; height: 15px; flex-shrink: 0; }
-    .agent-timeout-banner .banner-progress {
-      display: none; flex: 1; height: 4px; min-width: 80px;
-      background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden;
-    }
-    .agent-timeout-banner.recovering .banner-progress { display: block; }
-    .agent-timeout-banner .banner-progress .bar {
-      width: 40%; height: 100%; border-radius: 2px;
-      background: currentColor; opacity: 0.7;
-      animation: banner-indeterminate 1.2s ease-in-out infinite;
-    }
-    @keyframes banner-indeterminate {
-      0% { transform: translateX(-120%); }
-      100% { transform: translateX(320%); }
-    }
-
-    /* ---------- LLM 引擎/GPU 实时监控条 ---------- */
-    .engine-monitor {
-      display: flex; flex-wrap: wrap; align-items: center; gap: 16px;
-      margin: 0 16px 8px; padding: 6px 14px;
-      border: 1px solid var(--border); border-radius: var(--radius-sm);
-      background: var(--bg-alt); font-size: 11px; color: var(--text-light);
-    }
-    .engine-monitor .mon-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-    .engine-monitor .mon-label { color: var(--text-light); }
-    .engine-monitor .mon-val { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
-    .engine-monitor .mon-bar {
-      width: 70px; height: 5px; border-radius: 3px;
-      background: rgba(255,255,255,0.08); overflow: hidden;
-    }
-    .engine-monitor .mon-bar-fill { height: 100%; border-radius: 3px; background: var(--success); transition: width 0.5s ease; }
-    .engine-monitor .mon-bar-fill.warn { background: var(--warning); }
-    .engine-monitor .mon-bar-fill.hot { background: var(--danger); }
-    .engine-monitor .mon-sep { width: 1px; height: 14px; background: var(--border-bright); }
-
     /* ==================== Search Tab ==================== */
     .search-container {
       background: var(--card-bg);
@@ -2199,6 +2128,116 @@
     }
     .drill-enigma-col.changed-row td { background: rgba(201,162,39,0.06); }
 
+    /* BOM 原始列对比表格 */
+    .drill-bom-compare {
+      flex: 1 1 480px;
+      min-width: 320px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .drill-bom-header, .drill-ref-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: var(--bg-alt);
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .drill-section-title {
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-size: 11px;
+    }
+    .drill-bom-meta { color: var(--text-secondary); font-size: 11px; }
+    .drill-bom-meta b { color: #e8b923; font-weight: 600; }
+
+    .drill-compare-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .drill-compare-table thead th {
+      background: rgba(192,192,192,0.06);
+      color: var(--text-secondary);
+      font-weight: 600;
+      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .drill-compare-table th.col-field { width: 30%; }
+    .drill-compare-table th.col-from,
+    .drill-compare-table th.col-to { width: 35%; }
+    .drill-compare-table th.col-from { color: #f87171; }
+    .drill-compare-table th.col-to { color: #34d399; }
+    .drill-compare-table tbody th {
+      padding: 8px 12px;
+      text-align: left;
+      font-weight: 500;
+      color: var(--text);
+      border-bottom: 1px solid var(--border);
+      font-family: var(--mono-font);
+      font-size: 11px;
+      position: relative;
+    }
+    .drill-compare-table td {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+      word-break: break-all;
+      vertical-align: top;
+    }
+    .drill-compare-table td.empty { color: var(--text-light); font-style: italic; }
+    .drill-compare-table tr.changed-row td { background: rgba(232,185,35,0.08); }
+    .drill-compare-table tr.changed-row.diff td { background: rgba(232,185,35,0.12); }
+    .drill-compare-table tr:hover td,
+    .drill-compare-table tr:hover th { background: var(--card-bg-alt); }
+
+    .drill-side-tag {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 6px;
+      font-size: 10px;
+      border-radius: 8px;
+      font-weight: 500;
+      text-transform: none;
+      letter-spacing: 0;
+      font-family: inherit;
+    }
+    .drill-side-tag.from-side { background: rgba(248,113,113,0.15); color: #f87171; }
+    .drill-side-tag.to-side { background: rgba(52,211,153,0.15); color: #34d399; }
+
+    /* ENIGMA 参考区 */
+    .drill-enigma-ref {
+      flex: 1 1 360px;
+      min-width: 280px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      opacity: 0.85;
+    }
+    .drill-ref-note {
+      font-size: 10px;
+      color: var(--text-light);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .drill-section-hint {
+      padding: 20px;
+      text-align: center;
+      color: var(--text-light);
+      font-style: italic;
+      font-size: 12px;
+    }
+
     /* Drilldown toolbar */
     .drill-toolbar {
       display: flex;
@@ -2807,16 +2846,6 @@
             </select>
           </div>
           <div class="model-bar-right">
-            <div class="engine-switcher" id="engineSwitcher" title="切换大模型推理引擎">
-              <button class="engine-btn" id="engineOllamaBtn" onclick="switchEngine('ollama')">
-                <span class="engine-dot" id="ollamaDot"></span>
-                <span data-i18n="engineOllama">Ollama</span>
-              </button>
-              <button class="engine-btn" id="engineVllmBtn" onclick="switchEngine('vllm')">
-                <span class="engine-dot" id="vllmDot"></span>
-                <span data-i18n="engineVllm">vLLM</span>
-              </button>
-            </div>
             <button class="new-chat-btn" onclick="newChat()" id="newChatBtn" title="新对话">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
               <span data-i18n="newChat">新对话</span>
@@ -2824,31 +2853,7 @@
             <span class="model-mode" id="modelMode"></span>
           </div>
         </div>
-        <!-- vLLM/规则模式状态横幅 (异常提示 + 恢复进度) -->
-        <div class="agent-timeout-banner" id="engineNoticeBanner">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          <span id="engineNoticeText"></span>
-          <div class="banner-progress"><div class="bar"></div></div>
-        </div>
-        <!-- 引擎调用 / 显卡资源实时监控条 -->
-        <div class="engine-monitor" id="engineMonitor">
-          <span class="mon-item"><span class="mon-label">当前引擎</span><span class="mon-val" id="monActiveEngine">--</span></span>
-          <span class="mon-sep"></span>
-          <span class="mon-item"><span class="mon-label">GPU 利用率</span>
-            <span class="mon-bar"><span class="mon-bar-fill" id="monGpuUtilBar"></span></span>
-            <span class="mon-val" id="monGpuUtil">--</span>
-          </span>
-          <span class="mon-item"><span class="mon-label">显存</span>
-            <span class="mon-bar"><span class="mon-bar-fill" id="monGpuMemBar"></span></span>
-            <span class="mon-val" id="monGpuMem">--</span>
-          </span>
-          <span class="mon-item"><span class="mon-label">温度</span><span class="mon-val" id="monGpuTemp">--</span></span>
-          <span class="mon-sep"></span>
-          <span class="mon-item"><span class="mon-label">vLLM 调用</span><span class="mon-val" id="monVllmCalls">0</span></span>
-          <span class="mon-item"><span class="mon-label">Ollama 调用</span><span class="mon-val" id="monOllamaCalls">0</span></span>
-          <span class="mon-item"><span class="mon-label">在途请求</span><span class="mon-val" id="monInflight">0</span></span>
-          <span class="mon-item"><span class="mon-label">Ollama 显存</span><span class="mon-val" id="monOllamaVram">--</span></span>
-        </div>
+        <!-- 引擎状态横幅 & GPU 监控已移至后台管理端 (admin#monitor) -->
         <div class="chat-messages" id="chatMessages"></div>
         <div class="chat-scroll-tip" id="chatScrollTip">
           <div class="chat-tip-icon">
@@ -5018,12 +5023,12 @@
           // EC detection: presence of an EC value in the to-stage (ENIGMA)
           return d.has_ec === true;
         case 'new_kem':
-          // KEM release: has EC and a non-empty KEM Number in the to-record
-          var kemVal = _drillGetField(d, 'to_record', 'KEM Number');
-          return d.has_ec === true && !!kemVal;
+          // KEM release: has EC and the part has KEM values (ENIGMA multi-value index)
+          var kemArr = d.kem_values || [];
+          return d.has_ec === true && kemArr.length > 0;
         case 'soma_ja':
-          var somaVal = (_drillGetField(d, 'to_record', 'SOMA in ZEUS') || '').toLowerCase();
-          return somaVal === 'ja' || somaVal === 'yes' || somaVal === 'true' || somaVal === '1';
+          // SOMA ja: from delta top-level soma_ja boolean (ENIGMA-backed)
+          return d.soma_ja === true;
         case 'no_ec':
           return d.has_ec === false;
         case 'zeus':
@@ -5158,7 +5163,112 @@
       return _homeDrillEscape(v);
     }
 
+    // Render BOM field comparison as a 3-col table (field / from / to)
+    function _renderBomCompare(bomCompare, fromStageLabel, toStageLabel) {
+      if (!bomCompare) return '<div class="drill-section-hint">无 BOM 对比数据</div>';
+      var fromCount = bomCompare.from_field_count || 0;
+      var toCount = bomCompare.to_field_count || 0;
+      var fromShort = fromStageLabel.split(' · ')[0];
+      var toShort = toStageLabel.split(' · ')[0];
+
+      var rows = '';
+      // 1) 只在 from 的字段
+      if (bomCompare.only_in_from && bomCompare.only_in_from.length) {
+        bomCompare.only_in_from.forEach(function(f) {
+          var val = (f.value === null || f.value === undefined) ? '' : String(f.value);
+          rows += '<tr class="changed-row only-from">' +
+                   '<th>' + _homeDrillEscape(f.field) +
+                     '<span class="drill-side-tag from-side">仅 ' + fromShort + '</span></th>' +
+                   '<td class="from-col">' + _homeDrillFormatVal(val) + '</td>' +
+                   '<td class="to-col empty">—</td>' +
+                 '</tr>';
+        });
+      }
+      // 2) 只在 to 的字段
+      if (bomCompare.only_in_to && bomCompare.only_in_to.length) {
+        bomCompare.only_in_to.forEach(function(f) {
+          var val = (f.value === null || f.value === undefined) ? '' : String(f.value);
+          rows += '<tr class="changed-row only-to">' +
+                   '<th>' + _homeDrillEscape(f.field) +
+                     '<span class="drill-side-tag to-side">仅 ' + toShort + '</span></th>' +
+                   '<td class="from-col empty">—</td>' +
+                   '<td class="to-col">' + _homeDrillFormatVal(val) + '</td>' +
+                 '</tr>';
+        });
+      }
+      // 3) 两边都有的字段
+      if (bomCompare.common && bomCompare.common.length) {
+        bomCompare.common.forEach(function(c) {
+          var fv = (c.from_value === null || c.from_value === undefined) ? '' : String(c.from_value);
+          var tv = (c.to_value === null || c.to_value === undefined) ? '' : String(c.to_value);
+          var diffCls = c.is_different ? ' changed-row diff' : '';
+          rows += '<tr class="' + diffCls + '">' +
+                   '<th>' + _homeDrillEscape(c.field) + '</th>' +
+                   '<td class="from-col">' + _homeDrillFormatVal(fv) + '</td>' +
+                   '<td class="to-col">' + _homeDrillFormatVal(tv) + '</td>' +
+                 '</tr>';
+        });
+      }
+
+      if (!rows) return '<div class="drill-section-hint">无字段</div>';
+
+      return (
+        '<div class="drill-bom-compare">' +
+          '<div class="drill-bom-header">' +
+            '<span class="drill-section-title">BOM 原始列对比</span>' +
+            '<span class="drill-bom-meta">' +
+              fromShort + ': ' + fromCount + ' 列 · ' +
+              toShort + ': ' + toCount + ' 列 · ' +
+              '差异 <b>' + (bomCompare.diff_count || 0) + '</b>' +
+            '</span>' +
+          '</div>' +
+          '<table class="drill-compare-table">' +
+            '<thead>' +
+              '<tr>' +
+                '<th class="col-field">字段</th>' +
+                '<th class="col-from">' + fromShort + '</th>' +
+                '<th class="col-to">' + toShort + '</th>' +
+              '</tr>' +
+            '</thead>' +
+            '<tbody>' + rows + '</tbody>' +
+          '</table>' +
+        '</div>'
+      );
+    }
+
+    // Render ENIGMA reference record (single table, not a stage comparison)
+    function _renderEnigmaRef(enigmaRef) {
+      if (!enigmaRef || !enigmaRef.record || typeof enigmaRef.record !== 'object') {
+        return '<div class="drill-enigma-ref">' +
+                 '<div class="drill-ref-header">' +
+                   '<span class="drill-section-title">ENIGMA 主表参考</span>' +
+                   '<span class="drill-ref-note">参考数据 · 非阶段 BOM 数据</span>' +
+                 '</div>' +
+                 '<div class="drill-section-hint">该 PN 不在 ENIGMA 主表中</div>' +
+               '</div>';
+      }
+      var record = enigmaRef.record;
+      var keys = Object.keys(record).sort();
+      if (keys.length === 0) {
+        return '<div class="drill-enigma-ref"><div class="drill-section-hint">无参考数据</div></div>';
+      }
+      var rows = '';
+      keys.forEach(function(k) {
+        var rawVal = record[k];
+        var display = (rawVal === null || rawVal === undefined || rawVal === '') ? '—' : String(rawVal);
+        rows += '<tr><th>' + _homeDrillEscape(k) + '</th><td>' + _homeDrillFormatVal(display) + '</td></tr>';
+      });
+      return '<div class="drill-enigma-ref">' +
+               '<div class="drill-ref-header">' +
+                 '<span class="drill-section-title">ENIGMA 主表参考</span>' +
+                 '<span class="drill-ref-note">参考数据 · 非阶段 BOM 数据 · ' + keys.length + ' 字段</span>' +
+               '</div>' +
+               '<table class="drill-enigma-table"><tbody>' + rows + '</tbody></table>' +
+             '</div>';
+    }
+
     // Render the full enigma record (all fields) as a two-column table
+    // 保留兼容: 旧的双列展示，现在作为 fallback (当 bom_compare 不存在时使用)
     function _renderEnigmaRecord(record, stageLabel, cssClass) {
       if (!record || typeof record !== 'object') {
         return '<div class="drill-enigma-col">' +
@@ -5217,9 +5327,24 @@
         var matchType = d.match_type || '';
         var ec = d.ec_value || '';
         var fav = d.fav_value || '';
-        var somaVal = _drillGetField(d, 'to_record', 'SOMA in ZEUS');
-        var zgsFrom = _drillGetField(d, 'from_record', 'ZGS DiaP');
-        var zgsTo = _drillGetField(d, 'to_record', 'ZGS DiaP');
+        // SOMA 值从 delta 顶层 soma_values 拿 (ENIGMA 多值索引)
+        var somaArr = d.soma_values || [];
+        var somaVal = somaArr.length ? somaArr.join(', ') : '';
+        // ZGS 从 bom_compare 取 (BOM 原始列)
+        var zgsFrom = '', zgsTo = '';
+        if (d.bom_compare && d.bom_compare.common) {
+          d.bom_compare.common.forEach(function(c) {
+            if (c.field && c.field.toLowerCase().indexOf('zgs') !== -1) {
+              zgsFrom = zgsFrom || (c.from_value != null ? String(c.from_value) : '');
+              zgsTo = zgsTo || (c.to_value != null ? String(c.to_value) : '');
+            }
+          });
+        }
+        // Fallback: 旧 enigma 字段
+        if (!zgsFrom && !zgsTo) {
+          zgsFrom = _drillGetField(d, 'from_record', 'ZGS DiaP');
+          zgsTo = _drillGetField(d, 'to_record', 'ZGS DiaP');
+        }
 
         var summaryTags = '';
         if (zgsFrom || zgsTo) {
@@ -5231,8 +5356,17 @@
 
         var fromStageLabel = _homeDrillState.fromStage + ' · ' + t('drillFromRecord');
         var toStageLabel = _homeDrillState.toStage + ' · ' + t('drillToRecord');
-        var enigmaHtml = _renderEnigmaRecord(d.enigma && d.enigma.from_record, fromStageLabel, 'from') +
-                         _renderEnigmaRecord(d.enigma && d.enigma.to_record, toStageLabel, 'to');
+
+        // 展开内容: 优先用 bom_compare + enigma_ref 两区展示
+        var detailHtml = '';
+        if (d.bom_compare || d.enigma_ref) {
+          detailHtml = _renderBomCompare(d.bom_compare, fromStageLabel, toStageLabel) +
+                       _renderEnigmaRef(d.enigma_ref);
+        } else {
+          // Fallback: 旧版双列展示
+          detailHtml = _renderEnigmaRecord(d.enigma && d.enigma.from_record, fromStageLabel, 'from') +
+                       _renderEnigmaRecord(d.enigma && d.enigma.to_record, toStageLabel, 'to');
+        }
 
         html +=
           '<div class="drill-pn-item" data-idx="' + idx + '">' +
@@ -5244,7 +5378,7 @@
               '<span class="drill-pn-type ' + matchType + '">' + _drillTypeLabel(matchType) + '</span>' +
               '<span class="drill-pn-summary">' + summaryTags + '</span>' +
             '</div>' +
-            '<div class="drill-enigma">' + enigmaHtml + '</div>' +
+            '<div class="drill-enigma">' + detailHtml + '</div>' +
           '</div>';
       });
       html += '</div>';
@@ -5565,10 +5699,17 @@
       _agentAbortController = new AbortController();
 
       try {
+        // 本地会话标识 (后端归因用): 本地生成持久化, 同一浏览器复用
+        if (!window._clientSessionId) {
+          window._clientSessionId = (crypto.randomUUID
+            ? crypto.randomUUID()
+            : 'sess-' + Date.now().toString(16) + Math.random().toString(16).slice(2, 10));
+        }
         const res = await fetch('/api/agent/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: query, lang: currentLang, history: chatHistory }),
+          body: JSON.stringify({ query: query, lang: currentLang, history: chatHistory,
+                                 session_id: window._clientSessionId }),
           signal: _agentAbortController.signal
         });
         const json = await res.json();
@@ -5694,193 +5835,6 @@
       } catch (e) {
         showToast('Switch failed', 'error');
       }
-    }
-
-    // ==================== LLM 引擎切换 / 监控 ====================
-    var _enginePollTimer = null;
-    var _engineSwitching = false;
-    var _lastRecoveryState = 'idle';
-
-    async function switchEngine(target) {
-      if (_engineSwitching) return;
-      var btn = document.getElementById(target === 'vllm' ? 'engineVllmBtn' : 'engineOllamaBtn');
-      var other = document.getElementById(target === 'vllm' ? 'engineOllamaBtn' : 'engineVllmBtn');
-      _engineSwitching = true;
-      if (btn) btn.disabled = true;
-      if (other) other.disabled = true;
-      showToast(currentLang === 'zh' ? '正在切换到 ' + target + ' 引擎, 请求排队处理中 ...' : 'Switching to ' + target + ' ...', 'info', 2500);
-      try {
-        var res = await fetch('/api/agent/engine', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ engine: target })
-        });
-        var json = await res.json();
-        if (json.success) {
-          showToast((json.message || (currentLang === 'zh' ? '已切换到 ' : 'Switched to ') + target), 'success', 3500);
-          if (json.engine) renderEngineStatus(json.engine);
-        } else {
-          showToast((currentLang === 'zh' ? '切换失败: ' : 'Switch failed: ') + (json.error || json.message || 'unknown'), 'error', 5000);
-        }
-      } catch (e) {
-        showToast(currentLang === 'zh' ? '切换请求失败, 请检查后端服务' : 'Switch request failed', 'error', 5000);
-      } finally {
-        _engineSwitching = false;
-        if (btn) btn.disabled = false;
-        if (other) other.disabled = false;
-        refreshEngineStatus();
-      }
-    }
-
-    function _setDot(id, cls) {
-      var el = document.getElementById(id);
-      if (el) el.className = 'engine-dot ' + cls;
-    }
-
-    function _monBarColor(pct) {
-      if (pct >= 90) return 'hot';
-      if (pct >= 70) return 'warn';
-      return '';
-    }
-
-    function _setBar(id, pct) {
-      var fill = document.getElementById(id);
-      if (!fill) return;
-      fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
-      fill.className = 'mon-bar-fill ' + _monBarColor(pct);
-    }
-
-    function _showEngineBanner(kind, text, recovering) {
-      var banner = document.getElementById('engineNoticeBanner');
-      var txt = document.getElementById('engineNoticeText');
-      if (!banner || !txt) return;
-      if (!kind) {
-        banner.classList.remove('show', 'critical', 'recovering');
-        txt.textContent = '';
-        return;
-      }
-      txt.textContent = text;
-      banner.classList.add('show');
-      banner.classList.toggle('critical', kind === 'critical');
-      banner.classList.toggle('recovering', !!recovering);
-    }
-
-    function renderEngineStatus(st) {
-      if (!st) return;
-      var engines = st.engines || {};
-      var ollama = engines.ollama || {};
-      var vllm = engines.vllm || {};
-      var active = st.active || 'rule';
-      var switching = !!st.switching;
-
-      // 按钮 active 态
-      var ob = document.getElementById('engineOllamaBtn');
-      var vb = document.getElementById('engineVllmBtn');
-      if (ob) ob.classList.toggle('active', active === 'ollama' && !switching);
-      if (vb) vb.classList.toggle('active', active === 'vllm' && !switching);
-
-      // 健康圆点 (切换中 -> 黄色脉冲)
-      if (switching) {
-        _setDot('ollamaDot', 'switching');
-        _setDot('vllmDot', 'switching');
-      } else {
-        _setDot('ollamaDot', ollama.healthy ? 'healthy' : 'unhealthy');
-        _setDot('vllmDot', vllm.healthy ? 'healthy' : 'unhealthy');
-      }
-
-      // 监控条: 当前引擎
-      var activeLabel = active === 'vllm' ? 'vLLM' : (active === 'ollama' ? 'Ollama' : (currentLang === 'zh' ? '规则模式' : 'Rule mode'));
-      var monActive = document.getElementById('monActiveEngine');
-      if (monActive) monActive.textContent = activeLabel + (switching ? (currentLang === 'zh' ? ' (切换中)' : ' (switching)') : '');
-
-      // 监控条: GPU
-      var gpu = st.gpu || {};
-      if (gpu.available) {
-        var util = Math.round(gpu.utilization_percent || 0);
-        var memPct = Math.round(gpu.memory_percent || 0);
-        _setBar('monGpuUtilBar', util);
-        _setBar('monGpuMemBar', memPct);
-        var u = document.getElementById('monGpuUtil');
-        var m = document.getElementById('monGpuMem');
-        var tp = document.getElementById('monGpuTemp');
-        if (u) u.textContent = util + '%';
-        if (m) m.textContent = Math.round(gpu.memory_used_mb || 0) + '/' + Math.round(gpu.memory_total_mb || 0) + ' MiB (' + memPct + '%)';
-        if (tp) tp.textContent = Math.round(gpu.temperature_c || 0) + '°C';
-      } else {
-        _setBar('monGpuUtilBar', 0);
-        _setBar('monGpuMemBar', 0);
-        var u2 = document.getElementById('monGpuUtil');
-        var m2 = document.getElementById('monGpuMem');
-        var tp2 = document.getElementById('monGpuTemp');
-        if (u2) u2.textContent = currentLang === 'zh' ? '不可用' : 'N/A';
-        if (m2) m2.textContent = currentLang === 'zh' ? '不可用' : 'N/A';
-        if (tp2) tp2.textContent = '--';
-      }
-
-      // 监控条: 调用数 / 在途
-      var vc = document.getElementById('monVllmCalls');
-      var oc = document.getElementById('monOllamaCalls');
-      var inf = document.getElementById('monInflight');
-      if (vc) vc.textContent = String(vllm.request_total || 0) + ((vllm.request_failed || 0) ? ' (失败' + vllm.request_failed + ')' : '');
-      if (oc) oc.textContent = String(ollama.request_total || 0) + ((ollama.request_failed || 0) ? ' (失败' + ollama.request_failed + ')' : '');
-      if (inf) inf.textContent = String((vllm.inflight || 0) + (ollama.inflight || 0));
-
-      // Ollama 显存驻留: vLLM 承载流量时模型应已卸载释放显存
-      var ov = document.getElementById('monOllamaVram');
-      if (ov) {
-        var loaded = ollama.loaded_models || [];
-        if (!ollama.healthy) {
-          ov.textContent = '离线'; ov.style.color = 'var(--text-light)'; ov.title = '';
-        } else if (loaded.length) {
-          ov.textContent = '驻留 ' + loaded.length + ' 个模型';
-          ov.style.color = 'var(--warning)';
-          ov.title = loaded.join(', ') + ' (模型加载中, 占用显存; 切换到 vLLM 后会自动卸载)';
-        } else {
-          ov.textContent = '已释放';
-          ov.style.color = 'var(--success)';
-          ov.title = 'Ollama 模型未驻留显存, 显存已让给 vLLM; 故障转移时模型按需重新加载';
-        }
-      }
-
-      // 横幅: 规则模式 / vLLM 恢复 / 切换中
-      var rec = st.vllm_recovery || {};
-      if (st.fallback_mode === 'rule') {
-        var msg = currentLang === 'zh'
-          ? '大模型服务暂不可用, 已自动退回规则模式应答; 系统正在后台恢复大模型服务。'
-          : 'LLM service unavailable, fell back to rule mode. Recovery in progress.';
-        _showEngineBanner('critical', msg, rec.state === 'restarting');
-      } else if (rec.state === 'restarting') {
-        var rmsg = currentLang === 'zh'
-          ? 'vLLM 调用异常, 正在自动重启并恢复 vLLM 模式 (第 ' + (rec.attempts || 1) + ' 次), 期间请求由 Ollama 接管, 请勿重复提交 ...'
-          : 'vLLM error, auto-restarting (attempt ' + (rec.attempts || 1) + '). Requests are served by Ollama meanwhile ...';
-        _showEngineBanner('warn', rmsg, true);
-      } else if (switching) {
-        _showEngineBanner('warn', currentLang === 'zh' ? '引擎切换中, 正在排空在途请求, 服务不中断 ...' : 'Switching engine, draining in-flight requests ...', true);
-      } else {
-        _showEngineBanner(null, '', false);
-      }
-
-      // 恢复完成 (restarting -> idle) 弹一次提示
-      if (_lastRecoveryState === 'restarting' && rec.state === 'idle') {
-        showToast(currentLang === 'zh' ? 'vLLM 已恢复正常, 切换回 vLLM 引擎' : 'vLLM recovered, switching back', 'success', 4000);
-      }
-      _lastRecoveryState = rec.state || 'idle';
-    }
-
-    async function refreshEngineStatus() {
-      try {
-        var res = await fetch('/api/agent/engine');
-        var json = await res.json();
-        if (json.success && json.engine) renderEngineStatus(json.engine);
-      } catch (e) {
-        // 静默: 后端未就绪时不打扰用户
-      }
-    }
-
-    function initEngineMonitor() {
-      refreshEngineStatus();
-      if (_enginePollTimer) clearInterval(_enginePollTimer);
-      _enginePollTimer = setInterval(refreshEngineStatus, 4000);
     }
 
     // ==================== Suggestions ====================
@@ -6409,7 +6363,6 @@
       loadAllPartNumbers();
       loadAgentStatus();
       loadModels();
-      initEngineMonitor();
       renderSearchHistory();
 
       // Initialize delta dashboard (home tab)

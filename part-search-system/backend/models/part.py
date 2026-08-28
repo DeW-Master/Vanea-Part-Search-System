@@ -118,10 +118,36 @@ class Part:
     data: dict
     # None -> PN not present in ENIGMA; dict of sets -> present (possibly empty values)
     enigma_values: Optional[Dict[str, set]] = None
+    # ENIGMA 主表完整参考记录 (单条, 同 PN 多行已合并), 纯参考不参与对比
+    enigma_record: Optional[dict] = None
 
     def value(self, business_key: str) -> str:
-        """Single access point: business key -> config mapping -> normalized value."""
-        return norm(self.data.get(business_column(business_key)))
+        """业务字段取值: BOM 原始数据优先, 没有则回退到 ENIGMA 参考记录。
+
+        取值优先级 (一旦取到非空值就返回):
+        1. ``self.data`` — BOM 原始列 (保证阶段数据的真实性)
+        2. ``self.enigma_record`` — ENIGMA 主表完整参考记录 (包含 status 等所有字段)
+        3. ``self.enigma_values`` — ENIGMA 多值索引 (ec/kem/fav/soma 的 set, 取首个稳定值)
+        4. 空串
+
+        这些参考值仅用于 KPI 统计和摘要展示, **不参与阶段数据对比**。
+        """
+        col_name = business_column(business_key)
+        # 1) BOM 原始数据
+        raw = norm(self.data.get(col_name))
+        if raw:
+            return raw
+        # 2) ENIGMA 完整参考记录 (字段名 = business_column 映射后的统一列名)
+        if self.enigma_record is not None:
+            v = norm(self.enigma_record.get(col_name))
+            if v:
+                return v
+        # 3) ENIGMA 多值索引 (业务键直接匹配, 用于 ec/kem/fav/soma)
+        if self.enigma_values is not None:
+            s = self.enigma_values.get(business_key)
+            if s:
+                return sorted(s)[0]
+        return ''
 
     @property
     def ec(self) -> str:
@@ -173,11 +199,16 @@ class Part:
         return self._enigma_set('fav')
 
     @property
+    def soma_values(self) -> set:
+        return self._enigma_set('soma')
+
+    @property
     def soma_ja(self) -> bool:
         return any(v.lower() == 'ja' for v in self._enigma_set('soma'))
 
     @classmethod
-    def from_row(cls, row_id, file_id, pn, data, stage='', enigma_values=None) -> 'Part':
+    def from_row(cls, row_id, file_id, pn, data, stage='', enigma_values=None,
+                 enigma_record=None) -> 'Part':
         data = data or {}
         return cls(
             pn=norm(pn),
@@ -187,6 +218,7 @@ class Part:
             row_id=row_id,
             data=data,
             enigma_values=enigma_values,
+            enigma_record=enigma_record,
         )
 
     @staticmethod
@@ -208,6 +240,8 @@ class Part:
                         change_type='unavailable',
                     ))
                 continue
+            if from_part and field_name not in from_part.data and to_part and field_name not in to_part.data:
+                continue
             old = norm(from_part.data.get(field_name)) if from_part else ''
             new = norm(to_part.data.get(field_name)) if to_part else ''
             change_type = determine_change_type(cfg.get('key') or '', old, new)
@@ -218,6 +252,77 @@ class Part:
             ))
         changes.sort(key=lambda c: (c.priority, 0 if c.change_type != 'unchanged' else 1))
         return changes
+
+    def compare(self, other: Optional['Part']) -> dict:
+        """逐字段对比两个 Part 的真实数据，零 hardcoding。
+
+        只比较 ``self.data`` 和 ``other.data`` 中各自真正存在的字段，
+        不做任何富化、补全或配置驱动的映射。适合下钻展示原始差异。
+
+        返回结构::
+
+            {
+                "from_field_count": int,       # 本侧字段数
+                "to_field_count": int,         # 对侧字段数
+                "common": [                    # 两边都有的字段 (按字段名排序)
+                    {"field": str, "from_value": str, "to_value": str, "is_different": bool}
+                ],
+                "only_in_from": [              # 只在本侧有的字段
+                    {"field": str, "value": str}
+                ],
+                "only_in_to": [                # 只在对侧有的字段
+                    {"field": str, "value": str}
+                ],
+                "diff_count": int,             # common 中有差异的数量 + 单边字段数
+            }
+
+        用法 (同一个 PN 在不同阶段的对比)::
+
+            from_catalog.get(pn).compare(to_catalog.get(pn))
+        """
+        my_data = self.data or {}
+        other_data = (other.data or {}) if other else {}
+
+        my_keys = set(my_data.keys())
+        other_keys = set(other_data.keys())
+
+        common_keys = sorted(my_keys & other_keys)
+        only_my_keys = sorted(my_keys - other_keys)
+        only_other_keys = sorted(other_keys - my_keys)
+
+        common = []
+        diff_count = 0
+        for k in common_keys:
+            v1 = my_data.get(k)
+            v2 = other_data.get(k)
+            # 统一用字符串比较，避免 None / '' / 数字类型混淆
+            s1 = '' if v1 is None else str(v1).strip()
+            s2 = '' if v2 is None else str(v2).strip()
+            is_diff = s1 != s2
+            if is_diff:
+                diff_count += 1
+            common.append({
+                "field": k,
+                "from_value": v1 if v1 is not None else '',
+                "to_value": v2 if v2 is not None else '',
+                "is_different": is_diff,
+            })
+
+        only_in_from = [{"field": k, "value": my_data.get(k) if my_data.get(k) is not None else ''}
+                        for k in only_my_keys]
+        only_in_to = [{"field": k, "value": other_data.get(k) if other_data.get(k) is not None else ''}
+                      for k in only_other_keys]
+
+        diff_count += len(only_my_keys) + len(only_other_keys)
+
+        return {
+            "from_field_count": len(my_keys),
+            "to_field_count": len(other_keys),
+            "common": common,
+            "only_in_from": only_in_from,
+            "only_in_to": only_in_to,
+            "diff_count": diff_count,
+        }
 
     def to_dict(self) -> dict:
         return {

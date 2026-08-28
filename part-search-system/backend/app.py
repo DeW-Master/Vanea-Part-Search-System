@@ -23,7 +23,7 @@ import uuid
 from datetime import datetime, timedelta
 from collections import deque
 import sys as _sys
-from flask import Flask, request, jsonify, session, send_from_directory, Response, stream_with_context
+from flask import Flask, request, jsonify, session, send_from_directory, Response, stream_with_context, redirect
 from flask_cors import CORS
 
 # Windows GBK 控制台兜底：强制 stdout/stderr 使用 UTF-8，避免 emoji(✅⚠️) 触发 UnicodeEncodeError 崩溃
@@ -652,6 +652,23 @@ def is_authenticated():
     return session.get('admin_logged_in', False)
 
 
+def get_client_ip():
+    """获取客户端真实 IP (以 IP 作为用户标识)。
+    优先取反向代理 (nginx) 写入的 X-Forwarded-For 首段, 回退 remote_addr。"""
+    try:
+        xff = request.headers.get('X-Forwarded-For', '')
+        if xff:
+            ip = xff.split(',')[0].strip()
+            if ip:
+                return ip
+        real_ip = request.headers.get('X-Real-IP', '').strip()
+        if real_ip:
+            return real_ip
+    except Exception:
+        pass
+    return request.remote_addr or 'unknown'
+
+
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     data = request.json
@@ -703,7 +720,8 @@ def admin():
 
 @app.route('/monitoring')
 def monitoring():
-    return send_from_directory(FRONTEND_DIR, 'monitoring.html')
+    # 监控页已合并进后台管理 → 重定向到 admin
+    return redirect('/admin#monitor')
 
 
 @app.route('/delta')
@@ -1270,6 +1288,8 @@ def agent_query():
             return jsonify({'success': False, 'error': 'Query required'}), 400
 
         lang = data.get('lang', 'zh')
+        session_id = data.get('session_id') or ''
+        client_ip = get_client_ip()
         # 多轮对话上下文: [{role: 'user'|'assistant', content}]
         history = data.get('history') or []
         if not isinstance(history, list):
@@ -1287,7 +1307,39 @@ def agent_query():
                     'content': content.strip()[:2000],
                 })
 
-        result = agent_manager.process_query(user_query, lang=lang, history=clean_history)
+        _t0 = time.time()
+        try:
+            result = agent_manager.process_query(user_query, lang=lang,
+                                                 history=clean_history,
+                                                 session_id=session_id, ip=client_ip)
+        except Exception as e:
+            # 失败也留一条日志 (便于排查某个用户的报错)
+            try:
+                import user_log
+                user_log.record_search(client_ip, user_query, mode='error',
+                                       duration_ms=int((time.time() - _t0) * 1000),
+                                       ok=False, session_id=session_id,
+                                       answer_preview=str(e)[:160])
+            except Exception:
+                pass
+            raise
+        _dur_ms = int((time.time() - _t0) * 1000)
+
+        # 按 IP 记录精简搜索日志 (提问 / 模式 / SQL / 结果行数 / 耗时 / 回复摘要)
+        try:
+            import user_log
+            _intent = result.get('intent') or {}
+            _results = result.get('search_results') or []
+            user_log.record_search(
+                client_ip, user_query,
+                mode=result.get('mode', ''),
+                sql=_intent.get('sql', '') if isinstance(_intent, dict) else '',
+                result_count=len(_results) if isinstance(_results, list) else 0,
+                duration_ms=_dur_ms, ok=True, session_id=session_id,
+                answer_preview=result.get('response', ''))
+        except Exception:
+            pass
+
         response_data = {
             'success': True,
             'response': result['response'],
@@ -2010,6 +2062,8 @@ def set_concurrent_max():
 @app.route('/api/monitoring/current')
 def monitoring_current():
     """获取当前系统监控指标"""
+    if not is_authenticated():
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 403
     metrics = collect_metrics()
     return jsonify({'success': True, 'data': metrics})
 
@@ -2017,6 +2071,8 @@ def monitoring_current():
 @app.route('/api/monitoring/history')
 def monitoring_history():
     """获取历史监控指标"""
+    if not is_authenticated():
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 403
     with _monitoring_lock:
         history = list(_metrics_history)
     return jsonify({
@@ -2024,6 +2080,129 @@ def monitoring_history():
         'data': history,
         'interval_seconds': 5,
     })
+
+
+@app.route('/api/monitoring/gpu_requests')
+def monitoring_gpu_requests():
+    """GPU 多用户并发监控: 双引擎状态 + 在途 LLM 调用清单 + 并发槽位。"""
+    if not is_authenticated():
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+    try:
+        engine = None
+        if AGENT_AVAILABLE:
+            try:
+                engine = agent_manager.engine_status()
+            except Exception:
+                engine = None
+        return jsonify({
+            'success': True,
+            'engine': engine,
+            'active_sessions': len(_active_sessions),
+            'active_session_count': len(_active_sessions),
+            'max_concurrent': MAX_CONCURRENT_SEARCHES,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/monitoring/users')
+def monitoring_users():
+    """用户列表 (以 IP 为用户 ID): 累计搜索次数 / 最近活跃 / 当前在途 GPU 份额。
+
+    合并两个数据源:
+      - user_log: 历史搜索统计 (次数/首末活跃/会话/错误数)
+      - 引擎在途清单: 当前正在占用 GPU 的请求, 按 IP 聚合计算算力份额
+    """
+    if not is_authenticated():
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+    try:
+        import user_log
+        users = user_log.list_users()
+        uindex = {u['ip']: u for u in users}
+
+        # 当前在途请求按 IP 聚合 (算力份额 = 该 IP 各请求 share 之和)
+        inflight_by_ip = {}
+        engine = None
+        if AGENT_AVAILABLE:
+            try:
+                engine = agent_manager.engine_status()
+            except Exception:
+                engine = None
+        if engine:
+            for r in (engine.get('inflight_requests') or []):
+                ip = r.get('ip') or 'unknown'
+                slot = inflight_by_ip.setdefault(ip, {'gpu_share_percent': 0.0,
+                                                      'inflight': 0, 'stage': ''})
+                slot['gpu_share_percent'] += float(r.get('compute_share_percent') or 0)
+                slot['inflight'] += 1
+                slot['stage'] = r.get('stage') or slot['stage']
+
+        # 在途但当日尚无日志文件的 IP 也要出现在列表里
+        for ip, slot in inflight_by_ip.items():
+            if ip not in uindex:
+                u = {'ip': ip, 'count': 0, 'first_ts': '', 'last_ts': '',
+                     'last_session': '', 'errors': 0}
+                users.append(u)
+                uindex[ip] = u
+
+        for u in users:
+            slot = inflight_by_ip.get(u['ip'])
+            u['gpu_share_percent'] = round(slot['gpu_share_percent'], 1) if slot else 0.0
+            u['inflight'] = slot['inflight'] if slot else 0
+            u['active_stage'] = slot['stage'] if slot else ''
+            u['active_now'] = bool(slot)
+
+        users.sort(key=lambda x: (x.get('active_now'), x.get('last_ts', '')), reverse=True)
+        return jsonify({
+            'success': True,
+            'users': users,
+            'total_users': len(users),
+            'active_users': len(inflight_by_ip),
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/monitoring/user_log')
+def monitoring_user_log():
+    """按 IP 查看用户最近搜索历史 (JSON, 供网页下钻面板)。"""
+    if not is_authenticated():
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+    ip = (request.args.get('ip') or '').strip()
+    if not ip:
+        return jsonify({'success': False, 'error': 'ip required'}), 400
+    try:
+        import user_log
+        limit = min(int(request.args.get('limit', 100)), 500)
+    except Exception:
+        limit = 100
+    try:
+        entries = user_log.read_user_log(ip, limit=limit)
+        return jsonify({'success': True, 'ip': ip, 'entries': entries})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/monitoring/user_log')
+def monitoring_user_log_text():
+    """网页可直接打开的用户日志纯文本视图 (浏览器新标签页访问)。"""
+    if not is_authenticated():
+        return Response('需要管理员登录后查看 (/admin 登录)', status=403,
+                        mimetype='text/plain; charset=utf-8')
+    ip = (request.args.get('ip') or '').strip()
+    if not ip:
+        return Response('缺少 ip 参数, 例如 /monitoring/user_log?ip=127.0.0.1',
+                        status=400, mimetype='text/plain; charset=utf-8')
+    try:
+        import user_log
+        text = user_log.render_user_log_text(ip, limit=300)
+        return Response(text, mimetype='text/plain; charset=utf-8')
+    except Exception as e:
+        return Response('日志读取失败: %s' % e, status=500,
+                        mimetype='text/plain; charset=utf-8')
 
 
 # ============ 增强版统计 API（用于饼图） ============

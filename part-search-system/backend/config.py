@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 van.ea 车辆零件智能查询系统 - 配置文件
-版本: build20260817 (Phase 3)
-更新日期: 2026-08-17
+版本: build20260828 (Phase 3)
+更新日期: 2026-08-28
 """
 
 import os
@@ -13,11 +13,24 @@ PROJECT_ROOT = os.path.dirname(BASE_DIR)
 DATA_DIR = os.path.join(PROJECT_ROOT, 'data')
 
 # ============ 版本信息 ============
-APP_VERSION = "build20260817"
+APP_VERSION = "build20260828"
 APP_NAME = "van.ea 车辆零件智能查询"
 APP_CODENAME = "van.ea"
 
 VERSION_HISTORY = [
+    {
+        "version": "build20260828",
+        "date": "2026-08-28",
+        "features": [
+            "🔬 Part.compare() 零 hardcoding 逐字段对比，支持任意两阶段 BOM 数据对比",
+            "📊 Delta 下钻双区展示：BOM 原始列对比表 + ENIGMA 主表参考，数据严格分离",
+            "🧹 移除 ENIGMA 富化 Part.data 逻辑，保证各阶段 BOM 数据纯粹独立",
+            "🏠 主页 Dashboard KPI 数值保持不变（value() 三级回退 + bar_line 口径对齐）",
+            "🛡️ 系统监控合并到管理后台实时监控 tab，普通用户无权限查看",
+            "📡 在途调用强化：显示调用者/资源/起始时间/当前操作 等 9 列信息",
+            "📝 用户操作 JSONL 日志：按 IP 分文件，支持查询历史与错误追溯",
+        ]
+    },
     {
         "version": "build20260817",
         "date": "2026-08-17",

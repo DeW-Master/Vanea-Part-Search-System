@@ -1008,6 +1008,147 @@
             margin-left: 4px;
         }
 
+        /* ===== Monitor Panel Styles ===== */
+        .mon-card-sub { font-size: 12px; color: var(--text-light); margin-top: 6px; }
+        .mon-drill-hint { font-size: 11px; color: var(--info); margin-top: 4px; }
+        .stat-card.danger .stat-icon { background: var(--danger-light); }
+        .stat-card.danger .stat-icon svg { color: var(--danger); }
+        .stat-card.danger .stat-value { color: var(--danger); }
+        .stat-card.silver .stat-icon { background: var(--card-bg-alt); }
+        .stat-card.silver .stat-icon svg { color: var(--silver-mid); }
+        .stat-card.silver .stat-value { color: var(--silver); }
+        .stat-card.clickable { cursor: pointer; transition: border-color 0.2s, box-shadow 0.2s; }
+        .stat-card.clickable:hover { border-color: var(--silver-dark); }
+
+        .mon-section-title {
+            font-size: 14px; font-weight: 600; color: var(--silver-mid);
+            letter-spacing: 0.5px;
+            margin: 28px 0 14px; padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; gap: 10px;
+        }
+        .mon-section-title .hint { font-weight: 400; letter-spacing: 0; color: var(--text-light); font-size: 12px; }
+
+        .mon-panel-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+        }
+        .mon-table-wrap { overflow-x: auto; }
+
+        .gpu-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+        .gp-chip {
+            display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+            padding: 4px 12px; border-radius: 12px; background: var(--card-bg-alt);
+            border: 1px solid var(--border);
+            font-size: 12px; color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
+        }
+        .gp-chip b { color: var(--text); font-weight: 700; }
+        .gpu-sub-title { margin: 14px 0 8px; color: var(--text-secondary); font-weight: 600; font-size: 13px; }
+
+        .gpu-req-table, .user-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+        .gpu-req-table th, .user-table th {
+            text-align: left; font-weight: 600; color: var(--text-secondary);
+            padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; font-size: 12px;
+        }
+        .gpu-req-table td, .user-table td {
+            padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.04);
+            vertical-align: middle; font-size: 13px;
+        }
+        .gpu-req-table tr.gp-empty td, .user-table tr.gp-empty td {
+            color: var(--text-light); text-align: center; padding: 16px;
+        }
+        .gp-user { color: var(--text); font-weight: 700; white-space: nowrap; font-family: Consolas, monospace; }
+        .gp-query { color: var(--text-secondary); max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .gp-stage { white-space: nowrap; color: var(--text-secondary); }
+        .gp-stage-tag {
+            display: inline-block; padding: 2px 8px; border-radius: 8px;
+            font-size: 11px; font-weight: 600; white-space: nowrap;
+        }
+        .gp-stage-tag.plan { background: rgba(91,154,160,0.15); color: var(--info); }
+        .gp-stage-tag.sql { background: rgba(154,138,184,0.15); color: var(--purple); }
+        .gp-stage-tag.exec { background: rgba(91,157,110,0.15); color: var(--success); }
+        .gp-stage-tag.gen { background: rgba(201,162,39,0.15); color: var(--warning); }
+        .gp-stage-tag.done { background: rgba(255,255,255,0.08); color: var(--text-secondary); }
+        .gp-stage-tag.error { background: rgba(199,84,80,0.15); color: var(--danger); }
+        .gp-engine-tag { padding: 2px 8px; border-radius: 8px; font-weight: 700; white-space: nowrap; font-size: 11px; }
+        .gp-engine-tag.vllm { background: rgba(91,157,110,0.15); color: var(--success); }
+        .gp-engine-tag.ollama { background: rgba(201,162,39,0.15); color: var(--warning); }
+        .gp-share { width: 140px; min-width: 140px; }
+        .mon-bar { width: 70px; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden; display: inline-block; vertical-align: middle; }
+        .mon-bar-fill { height: 100%; border-radius: 3px; background: var(--silver); }
+        .gp-share-val { margin-left: 8px; color: var(--text); font-weight: 600; font-size: 12px; }
+        .gp-elapsed { color: var(--text); font-weight: 600; white-space: nowrap; }
+        .gp-start-time { color: var(--silver-mid); font-family: Consolas, monospace; font-size: 12px; white-space: nowrap; }
+        .gp-prompt-len { color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+
+        .user-table tbody tr.user-row { cursor: pointer; }
+        .user-table tbody tr.user-row:hover { background: rgba(255,255,255,0.03); }
+        .user-ip { color: var(--text); font-weight: 700; font-family: Consolas, monospace; white-space: nowrap; }
+        .badge {
+            display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 11px;
+            font-weight: 700; line-height: 18px;
+        }
+        .badge.live { background: var(--success-light); color: var(--success); }
+        .badge.idle { background: rgba(255,255,255,0.06); color: var(--text-light); }
+        .badge.err { background: var(--danger-light); color: var(--danger); }
+        .log-link {
+            display: inline-block; padding: 4px 12px; border: 1px solid var(--border-bright);
+            border-radius: var(--radius); color: var(--info); text-decoration: none;
+            font-size: 12px; white-space: nowrap;
+        }
+        .log-link:hover { border-color: var(--info); color: var(--silver); }
+        .user-detail-row td { background: var(--bg-alt); padding: 0; }
+        .user-detail { padding: 12px 20px; }
+        .hist-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+        .hist-table th {
+            text-align: left; font-size: 11px; color: var(--text-light); font-weight: 600;
+            padding: 6px 10px; border-bottom: 1px solid var(--border);
+        }
+        .hist-table td {
+            padding: 6px 10px; font-size: 12px; color: var(--text-secondary);
+            border-bottom: 1px solid rgba(255,255,255,0.03); vertical-align: top;
+        }
+        .hist-q { color: var(--text); max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .hist-sql { color: var(--purple); font-family: Consolas, monospace; font-size: 11px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .mode-tag { padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 700; background: var(--info-light); color: var(--info); }
+        .mode-tag.error { background: var(--danger-light); color: var(--danger); }
+        .mode-tag.rule { background: var(--warning-light); color: var(--warning); }
+        .auth-note {
+            margin-top: 12px; padding: 10px 14px; border: 1px solid var(--border);
+            border-radius: var(--radius); color: var(--warning); font-size: 13px;
+            background: var(--warning-bg);
+        }
+
+        .mon-charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 20px;
+        }
+
+        .mon-system-info {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+        }
+        .mon-info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 12px;
+        }
+        .info-item {
+            display: flex; justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+        }
+        .info-item:last-child { border-bottom: none; }
+        .info-label { color: var(--text-secondary); }
+        .info-value { color: var(--text); font-family: Consolas, monospace; }
+
         /* ===== Responsive ===== */
         @media (max-width: 768px) {
             header { padding: 0 16px; }
@@ -1034,10 +1175,7 @@
             <span id="headerTitle">数据管理后台</span>
         </div>
         <div class="actions">
-            <a href="/monitoring" class="btn btn-ghost btn-sm" id="monitoringLink">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-                <span id="monitoringLinkText">系统监控</span>
-            </a>
+
             <a href="/" class="btn btn-ghost btn-sm" id="backLink">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
                 <span id="backLinkText">返回查询</span>
@@ -1359,49 +1497,153 @@
             <!-- ===== Real-time Monitor Section ===== -->
             <div class="panel" id="panel-monitor">
                 <div class="section-header">
-                    <h2 id="monitorSectionTitle">实时活动监控</h2>
-                    <p id="monitorSectionDesc">追踪当前系统在线用户数量、新用户访问及活动状态。</p>
+                    <h2>实时监控</h2>
+                    <p>系统资源、GPU 算力、用户调用全链路实时追踪。</p>
                 </div>
                 <div class="section-body">
                     <div class="monitor-status-bar">
                         <span class="monitor-live-dot"></span>
-                        <span id="monitorLiveText">实时更新中</span>
+                        <span>实时更新中</span>
                         <span class="monitor-last-update" id="monitorLastUpdate"></span>
                     </div>
-                    <div class="stats-grid" id="monitorStatsGrid">
+
+                    <div class="stats-grid">
+                        <div class="stat-card blue">
+                            <div class="stat-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
+                            </div>
+                            <div class="stat-label">CPU 使用率</div>
+                            <div class="stat-value" id="cpuValue">--<span style="font-size:16px;color:var(--text-secondary);margin-left:4px;">%</span></div>
+                            <div class="mon-card-sub" id="cpuSub">检测中...</div>
+                        </div>
                         <div class="stat-card green">
                             <div class="stat-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
                             </div>
-                            <div class="stat-label" id="monitorActiveLabel">当前活动用户</div>
-                            <div class="stat-value" id="monitorActiveCount">0</div>
+                            <div class="stat-label">内存使用率</div>
+                            <div class="stat-value" id="memValue">--<span style="font-size:16px;color:var(--text-secondary);margin-left:4px;">%</span></div>
+                            <div class="mon-card-sub" id="memSub">检测中...</div>
+                        </div>
+                        <div class="stat-card purple">
+                            <div class="stat-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="7" y1="3" x2="7" y2="21"/><line x1="17" y1="3" x2="17" y2="21"/><line x1="3" y1="12" x2="21" y2="12"/></svg>
+                            </div>
+                            <div class="stat-label">GPU 使用率</div>
+                            <div class="stat-value" id="gpuValue">--<span style="font-size:16px;color:var(--text-secondary);margin-left:4px;">%</span></div>
+                            <div class="mon-card-sub" id="gpuSub">检测中...</div>
                         </div>
                         <div class="stat-card orange">
                             <div class="stat-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3v18"/><path d="M3 12h18"/></svg>
                             </div>
-                            <div class="stat-label" id="monitorNewLabel">新用户</div>
-                            <div class="stat-value" id="monitorNewCount">0</div>
+                            <div class="stat-label">磁盘使用率</div>
+                            <div class="stat-value" id="diskValue">--<span style="font-size:16px;color:var(--text-secondary);margin-left:4px;">%</span></div>
+                            <div class="mon-card-sub">应用磁盘</div>
+                        </div>
+                        <div class="stat-card danger">
+                            <div class="stat-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                            </div>
+                            <div class="stat-label">请求速率</div>
+                            <div class="stat-value" id="reqValue">--<span style="font-size:16px;color:var(--text-secondary);margin-left:4px;">/min</span></div>
+                            <div class="mon-card-sub" id="reqSub">累计: --</div>
+                        </div>
+                        <div class="stat-card silver clickable" id="userDrillCard" title="点击查看用户明细">
+                            <div class="stat-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            </div>
+                            <div class="stat-label">用户数量 / 活跃搜索</div>
+                            <div class="stat-value" id="activeValue">--<span style="font-size:16px;color:var(--text-secondary);margin-left:4px;">人</span></div>
+                            <div class="mon-card-sub" id="activeSub">点击下钻用户明细</div>
+                            <div class="mon-drill-hint">▼ 点击查看 IP / GPU 占用 / 搜索历史</div>
                         </div>
                     </div>
 
-                    <div class="file-stats-section" style="margin-top:32px;">
-                        <h3 class="charts-title" id="monitorListTitle">活动用户列表</h3>
-                        <div class="file-stats-table-wrap">
-                            <table class="admin-table file-stats-table" id="monitorVisitorTable">
+                    <div class="mon-section-title">GPU 多用户调用监控 <span class="hint">算力份额按各请求 prompt 规模加权估算 (vLLM 连续批处理共享 GPU)</span></div>
+                    <div class="mon-panel-card">
+                        <div class="gpu-chips">
+                            <span class="gp-chip">活跃搜索 <b id="gpSessions">--</b></span>
+                            <span class="gp-chip">并发上限 <b id="gpMax">--</b></span>
+                            <span class="gp-chip">在途 LLM 调用 <b id="gpInflight">0</b></span>
+                            <span class="gp-chip">vLLM 队列 <b id="gpQueue">N/A</b></span>
+                            <span class="gp-chip">KV Cache <b id="gpKv">N/A</b></span>
+                            <span class="gp-chip">当前引擎 <b id="gpEngine">--</b></span>
+                        </div>
+                        <div class="gpu-sub-title">在途 LLM 调用（实时）</div>
+                        <div class="mon-table-wrap">
+                            <table class="gpu-req-table">
                                 <thead>
                                     <tr>
-                                        <th id="monitorColId">用户ID</th>
-                                        <th id="monitorColPage">当前页面</th>
-                                        <th id="monitorColFirstSeen">首次访问</th>
-                                        <th id="monitorColLastSeen">最后心跳</th>
-                                        <th id="monitorColStatus">状态</th>
+                                        <th>用户 IP</th>
+                                        <th>会话 ID</th>
+                                        <th>开始时间</th>
+                                        <th>查询摘要</th>
+                                        <th>当前阶段</th>
+                                        <th>引擎</th>
+                                        <th>Prompt 长度</th>
+                                        <th>算力份额(估)</th>
+                                        <th>已耗时</th>
                                     </tr>
                                 </thead>
-                                <tbody id="monitorVisitorTableBody">
-                                    <tr><td colspan="5" style="text-align:center;color:var(--text-secondary);padding:24px;" id="monitorEmptyText">加载中...</td></tr>
+                                <tbody id="gpReqBody">
+                                    <tr class="gp-empty"><td colspan="9">当前无在途大模型调用</td></tr>
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+
+                    <div class="mon-section-title" id="userDetailAnchor">用户明细 <span class="hint">以客户端 IP 为用户 ID，点击行展开搜索历史，可打开完整日志</span></div>
+                    <div class="mon-panel-card">
+                        <div class="mon-table-wrap">
+                            <table class="user-table">
+                                <thead>
+                                    <tr>
+                                        <th>状态</th>
+                                        <th>用户 IP</th>
+                                        <th>累计搜索</th>
+                                        <th>错误</th>
+                                        <th>当前 GPU 份额</th>
+                                        <th>当前阶段</th>
+                                        <th>最近活跃</th>
+                                        <th>日志</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="userBody">
+                                    <tr class="gp-empty"><td colspan="8">加载中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="userAuthNote" style="display:none;" class="auth-note">
+                            用户明细需要管理员登录。请先登录后刷新本页。
+                        </div>
+                    </div>
+
+                    <div class="mon-section-title">历史趋势（近5分钟）</div>
+                    <div class="mon-charts-grid">
+                        <div class="chart-card">
+                            <div class="chart-card-title"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#5b9aa0;margin-right:8px;vertical-align:middle;"></span>CPU &amp; GPU 使用率</div>
+                            <div class="chart-container-sm"><canvas id="cpuGpuChart"></canvas></div>
+                        </div>
+                        <div class="chart-card">
+                            <div class="chart-card-title"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#c9a227;margin-right:8px;vertical-align:middle;"></span>内存使用</div>
+                            <div class="chart-container-sm"><canvas id="memChart"></canvas></div>
+                        </div>
+                        <div class="chart-card">
+                            <div class="chart-card-title"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#c75450;margin-right:8px;vertical-align:middle;"></span>请求速率</div>
+                            <div class="chart-container-sm"><canvas id="reqChart"></canvas></div>
+                        </div>
+                        <div class="chart-card">
+                            <div class="chart-card-title"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#9a8ab8;margin-right:8px;vertical-align:middle;"></span>活跃搜索数</div>
+                            <div class="chart-container-sm"><canvas id="activeChart"></canvas></div>
+                        </div>
+                    </div>
+
+                    <div class="mon-section-title">系统信息</div>
+                    <div class="mon-system-info">
+                        <div class="mon-info-grid">
+                            <div class="info-item"><span class="info-label">页面运行时长</span><span class="info-value" id="sysUptime">--</span></div>
+                            <div class="info-item"><span class="info-label">GPU 可用</span><span class="info-value" id="sysGpu">--</span></div>
+                            <div class="info-item"><span class="info-label">最后更新</span><span class="info-value" id="sysLastUpdate">--</span></div>
                         </div>
                     </div>
                 </div>
@@ -1921,64 +2163,452 @@
             if (section === 'columns') loadColumns();
             if (section === 'stats') loadStats();
             if (section === 'models') { loadBackendStatus(); loadAdminModels(); }
-            if (section === 'monitor') { loadPresenceStatus(); startMonitorPolling(); }
-            else { stopMonitorPolling(); }
+            if (section === 'monitor') { startFullMonitor(); }
+            else { stopFullMonitor(); }
         }
 
-        // ===== Real-time Presence Monitor =====
-        let _monitorTimer = null;
+        // ===== Real-time Monitor (Full) =====
+        let _monMetricsTimer = null;
+        let _monGpuTimer = null;
+        let _monUsersTimer = null;
+        let _monChartsInit = false;
+        let _monStartTime = null;
 
-        function _formatTime(ts) {
+        function _esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"]/g, function(c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+            });
+        }
+
+        // ---- Chart.js ----
+        let _monMaxPoints = 60;
+        let _monLabels = [];
+        let _monCpuData = [];
+        let _monGpuData = [];
+        let _monMemData = [];
+        let _monReqData = [];
+        let _monActiveData = [];
+        let _cpuGpuChart = null;
+        let _memChart = null;
+        let _reqChart = null;
+        let _activeChart = null;
+
+        function initMonitorCharts() {
+            if (_monChartsInit) return;
+            if (typeof Chart === 'undefined') return;
+            var cpuCtx = document.getElementById('cpuGpuChart');
+            var memCtx = document.getElementById('memChart');
+            var reqCtx = document.getElementById('reqChart');
+            var actCtx = document.getElementById('activeChart');
+            if (!cpuCtx || !memCtx || !reqCtx || !actCtx) return;
+
+            Chart.defaults.color = '#9a9a9a';
+            Chart.defaults.borderColor = '#2a2a2a';
+            Chart.defaults.font.family = "'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif";
+
+            function createLineChart(ctx, datasets, yMax) {
+                return new Chart(ctx, {
+                    type: 'line',
+                    data: { labels: _monLabels, datasets: datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: false,
+                        interaction: { intersect: false, mode: 'index' },
+                        plugins: {
+                            legend: { display: datasets.length > 1, position: 'bottom', labels: { boxWidth: 12, padding: 12, font: { size: 11 } } },
+                            tooltip: {
+                                backgroundColor: '#1a1a1a',
+                                borderColor: '#3a3a3a',
+                                borderWidth: 1,
+                                titleColor: '#c0c0c0',
+                                bodyColor: '#e8e8e8',
+                            }
+                        },
+                        scales: {
+                            x: { display: true, ticks: { maxTicksLimit: 6, font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.03)' } },
+                            y: {
+                                display: true,
+                                min: 0,
+                                max: yMax || 100,
+                                ticks: { font: { size: 10 }, callback: function(v) { return v + (yMax ? '' : '%'); } },
+                                grid: { color: 'rgba(255,255,255,0.03)' }
+                            }
+                        },
+                        elements: {
+                            point: { radius: 0, hitRadius: 8 },
+                            line: { tension: 0.3, borderWidth: 2 }
+                        }
+                    }
+                });
+            }
+
+            _cpuGpuChart = createLineChart(cpuCtx, [
+                { label: 'CPU', data: _monCpuData, borderColor: '#5b9aa0', backgroundColor: 'rgba(91,154,160,0.1)', fill: true },
+                { label: 'GPU', data: _monGpuData, borderColor: '#9a8ab8', backgroundColor: 'rgba(154,138,184,0.1)', fill: true },
+            ]);
+            _memChart = createLineChart(memCtx, [
+                { label: '内存', data: _monMemData, borderColor: '#c9a227', backgroundColor: 'rgba(201,162,39,0.1)', fill: true },
+            ]);
+            _reqChart = createLineChart(reqCtx, [
+                { label: '请求/分钟', data: _monReqData, borderColor: '#c75450', backgroundColor: 'rgba(199,84,80,0.1)', fill: true },
+            ], undefined);
+            _activeChart = createLineChart(actCtx, [
+                { label: '活跃搜索', data: _monActiveData, borderColor: '#c0c0c0', backgroundColor: 'rgba(192,192,192,0.1)', fill: true },
+            ], 5);
+            _monChartsInit = true;
+        }
+
+        function updateMonCharts(data) {
+            if (!_monChartsInit) return;
+            _monLabels.push(data.timestamp);
+            if (_monLabels.length > _monMaxPoints) _monLabels.shift();
+
+            _monCpuData.push(data.cpu_percent);
+            _monGpuData.push(data.gpu_available ? data.gpu_percent : null);
+            if (_monCpuData.length > _monMaxPoints) { _monCpuData.shift(); _monGpuData.shift(); }
+
+            _monMemData.push(data.memory_percent);
+            if (_monMemData.length > _monMaxPoints) _monMemData.shift();
+
+            _monReqData.push(data.requests_per_minute);
+            if (_monReqData.length > _monMaxPoints) _monReqData.shift();
+
+            _monActiveData.push(data.active_searches);
+            if (_monActiveData.length > _monMaxPoints) _monActiveData.shift();
+
+            _cpuGpuChart.update('none');
+            _memChart.update('none');
+            _reqChart.update('none');
+            _activeChart.update('none');
+        }
+
+        // ---- Metrics ----
+        function updateMetrics(data) {
+            var cpuVal = document.getElementById('cpuValue');
+            if (cpuVal) cpuVal.innerHTML = data.cpu_percent + '<span style="font-size:16px;color:var(--text-secondary);margin-left:4px;">%</span>';
+            var cpuSub = document.getElementById('cpuSub');
+            if (cpuSub) cpuSub.textContent = '系统负载';
+
+            var memVal = document.getElementById('memValue');
+            if (memVal) memVal.innerHTML = data.memory_percent + '<span style="font-size:16px;color:var(--text-secondary);margin-left:4px;">%</span>';
+            var memSub = document.getElementById('memSub');
+            if (memSub) memSub.textContent = data.memory_used_gb + ' / ' + data.memory_total_gb + ' GB';
+
+            if (data.gpu_available) {
+                var gpuVal = document.getElementById('gpuValue');
+                if (gpuVal) gpuVal.innerHTML = data.gpu_percent + '<span style="font-size:16px;color:var(--text-secondary);margin-left:4px;">%</span>';
+                var gpuSub = document.getElementById('gpuSub');
+                if (gpuSub) gpuSub.textContent = data.gpu_memory_used_gb + ' / ' + data.gpu_memory_total_gb + ' GB 显存';
+            } else {
+                var gpuVal2 = document.getElementById('gpuValue');
+                if (gpuVal2) gpuVal2.innerHTML = '--<span style="font-size:16px;color:var(--text-secondary);margin-left:4px;">N/A</span>';
+                var gpuSub2 = document.getElementById('gpuSub');
+                if (gpuSub2) gpuSub2.textContent = '未检测到GPU';
+            }
+
+            var diskVal = document.getElementById('diskValue');
+            if (diskVal) diskVal.innerHTML = data.disk_percent + '<span style="font-size:16px;color:var(--text-secondary);margin-left:4px;">%</span>';
+
+            var reqVal = document.getElementById('reqValue');
+            if (reqVal) reqVal.innerHTML = data.requests_per_minute + '<span style="font-size:16px;color:var(--text-secondary);margin-left:4px;">/min</span>';
+            var reqSub = document.getElementById('reqSub');
+            if (reqSub) reqSub.textContent = '累计: ' + data.total_requests.toLocaleString();
+
+            var actVal = document.getElementById('activeValue');
+            if (actVal) actVal.innerHTML = data.active_searches + '<span style="font-size:16px;color:var(--text-secondary);margin-left:4px;">人</span>';
+            var actSub = document.getElementById('activeSub');
+            if (actSub) actSub.textContent = '并发搜索中 (点击卡片查看明细)';
+
+            if (_monStartTime != null) {
+                var elapsed = Math.floor((Date.now() - _monStartTime) / 1000);
+                var hours = Math.floor(elapsed / 3600);
+                var mins = Math.floor((elapsed % 3600) / 60);
+                var secs = elapsed % 60;
+                var upEl = document.getElementById('sysUptime');
+                if (upEl) upEl.textContent = hours + 'h ' + mins + 'm ' + secs + 's';
+            }
+            var gpuAvail = document.getElementById('sysGpu');
+            if (gpuAvail) gpuAvail.textContent = data.gpu_available ? '是' : '否';
+            var lastUpd = document.getElementById('sysLastUpdate');
+            if (lastUpd) lastUpd.textContent = data.timestamp;
+
+            var monLast = document.getElementById('monitorLastUpdate');
+            if (monLast) monLast.textContent = '更新于 ' + data.timestamp;
+        }
+
+        function fetchMetrics() {
+            fetch('/api/monitoring/current')
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    if (res.success) {
+                        updateMetrics(res.data);
+                        updateMonCharts(res.data);
+                    }
+                })
+                .catch(function() {});
+        }
+
+        function loadMonHistory() {
+            fetch('/api/monitoring/history')
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    if (res.success && res.data && res.data.length > 0) {
+                        res.data.forEach(function(d) { updateMonCharts(d); });
+                        updateMetrics(res.data[res.data.length - 1]);
+                    }
+                })
+                .catch(function() {});
+        }
+
+        // ---- GPU Panel ----
+        function _stageClass(stage) {
+            if (!stage) return '';
+            var s = String(stage).toLowerCase();
+            if (s.indexOf('plan') >= 0 || s.indexOf('理解') >= 0) return 'plan';
+            if (s.indexOf('sql') >= 0 || s.indexOf('生成') >= 0) return 'sql';
+            if (s.indexOf('exec') >= 0 || s.indexOf('执行') >= 0 || s.indexOf('查询') >= 0) return 'exec';
+            if (s.indexOf('gen') >= 0 || s.indexOf('总结') >= 0 || s.indexOf('回答') >= 0) return 'gen';
+            if (s.indexOf('done') >= 0 || s.indexOf('完成') >= 0) return 'done';
+            if (s.indexOf('err') >= 0 || s.indexOf('错误') >= 0 || s.indexOf('fail') >= 0) return 'error';
+            return '';
+        }
+
+        function _formatStartTime(ts) {
             if (!ts) return '-';
-            const d = new Date(ts * 1000);
+            var d;
+            if (typeof ts === 'number') {
+                d = ts > 1e12 ? new Date(ts) : new Date(ts * 1000);
+            } else {
+                d = new Date(ts);
+            }
+            if (isNaN(d.getTime())) return String(ts).slice(0, 8);
             return d.toLocaleTimeString('zh-CN', { hour12: false });
         }
 
-        async function loadPresenceStatus() {
-            try {
-                const res = await fetch('/api/presence/status');
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                const data = await res.json();
-                if (!data.success) throw new Error('API error');
+        function _getPromptLen(r) {
+            if (r.prompt_chars != null) return r.prompt_chars + ' 字';
+            if (r.prompt_tokens != null) return r.prompt_tokens + ' tokens';
+            if (r.prompt_length != null) return r.prompt_length + ' 字';
+            var q = r.query || '';
+            return '约 ' + q.length + ' 字';
+        }
 
-                document.getElementById('monitorActiveCount').textContent = data.active_count;
-                document.getElementById('monitorNewCount').textContent = data.new_count;
+        function renderGpuRequests(st) {
+            var reqs = (st && st.inflight_requests) || [];
+            var vs = st && st.vllm_server;
 
-                const tbody = document.getElementById('monitorVisitorTableBody');
-                const visitors = data.visitors || [];
-                if (visitors.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-secondary);padding:24px;">${t('monitorEmpty')}</td></tr>`;
+            var inf = document.getElementById('gpInflight');
+            if (inf) inf.textContent = String(reqs.length);
+            var eng = document.getElementById('gpEngine');
+            if (eng) eng.textContent = st ? (st.active || '--') : '--';
+            var q = document.getElementById('gpQueue');
+            if (q) {
+                q.textContent = (vs && vs.available) ? ('运行 ' + (vs.running || 0) + ' / 等待 ' + (vs.waiting || 0)) : 'N/A';
+            }
+            var kv = document.getElementById('gpKv');
+            if (kv) {
+                if (vs && vs.available && vs.kv_cache_used_percent != null) {
+                    kv.textContent = vs.kv_cache_used_percent + '%';
                 } else {
-                    tbody.innerHTML = visitors.map(v => {
-                        const isNew = v.is_new;
-                        const statusClass = isNew ? 'new' : 'online';
-                        const statusText = isNew ? t('monitorStatusNew') : t('monitorStatusOnline');
-                        return `<tr>
-                            <td><code style="color:var(--info);">${v.id}</code></td>
-                            <td>${v.page || '-'}</td>
-                            <td>${_formatTime(v.first_seen)}</td>
-                            <td>${_formatTime(v.last_seen)}</td>
-                            <td><span class="visitor-status-tag ${statusClass}"><span class="dot"></span>${statusText}</span></td>
-                        </tr>`;
-                    }).join('');
+                    kv.textContent = 'N/A';
                 }
-                document.getElementById('monitorLastUpdate').textContent =
-                    (currentLang === 'zh' ? '更新于 ' : 'Updated ') + new Date().toLocaleTimeString('zh-CN', { hour12: false });
-            } catch (e) {
-                console.error('Presence status error:', e);
-                const tbody = document.getElementById('monitorVisitorTableBody');
-                if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--danger);padding:24px;">${t('monitorLoadError')}</td></tr>`;
+            }
+
+            var tbody = document.getElementById('gpReqBody');
+            if (!tbody) return;
+            if (!reqs.length) {
+                tbody.innerHTML = '<tr class="gp-empty"><td colspan="9">当前无在途大模型调用</td></tr>';
+            } else {
+                tbody.innerHTML = reqs.map(function(r) {
+                    var ip = r.ip || '未知';
+                    var sess = r.session_id ? ('#' + String(r.session_id).slice(0, 8)) : '-';
+                    var sharePct = r.compute_share_percent || 0;
+                    var stageCls = _stageClass(r.stage);
+                    var startTs = _formatStartTime(r.start_time);
+                    var promptLen = _getPromptLen(r);
+                    return '<tr>'
+                        + '<td class="gp-user">' + _esc(ip) + '</td>'
+                        + '<td class="gp-stage">' + _esc(sess) + '</td>'
+                        + '<td class="gp-start-time">' + startTs + '</td>'
+                        + '<td class="gp-query" title="' + _esc(r.query) + '">' + _esc(r.query || '(无摘要)') + '</td>'
+                        + '<td><span class="gp-stage-tag ' + stageCls + '">' + _esc(r.stage || '-') + '</span></td>'
+                        + '<td><span class="gp-engine-tag ' + _esc(r.engine || '') + '">' + _esc(r.engine || '-') + '</span></td>'
+                        + '<td class="gp-prompt-len">' + promptLen + '</td>'
+                        + '<td class="gp-share"><span class="mon-bar"><span class="mon-bar-fill" style="width:' + sharePct + '%"></span></span>'
+                        + '<span class="gp-share-val">' + sharePct.toFixed(0) + '%</span></td>'
+                        + '<td class="gp-elapsed">' + (r.elapsed_seconds || 0).toFixed(1) + 's</td>'
+                        + '</tr>';
+                }).join('');
             }
         }
 
-        function startMonitorPolling() {
-            stopMonitorPolling();
-            loadPresenceStatus();
-            _monitorTimer = setInterval(loadPresenceStatus, 5000);
+        function refreshGpuPanel() {
+            fetch('/api/monitoring/gpu_requests')
+                .then(function(r) { return r.json(); })
+                .then(function(json) {
+                    if (json.success) {
+                        if (json.engine) renderGpuRequests(json.engine);
+                        var s = document.getElementById('gpSessions');
+                        if (s) s.textContent = String(json.active_session_count != null ? json.active_session_count : 0);
+                        var m = document.getElementById('gpMax');
+                        if (m) m.textContent = String(json.max_concurrent != null ? json.max_concurrent : '--');
+                    }
+                })
+                .catch(function() {});
         }
 
-        function stopMonitorPolling() {
-            if (_monitorTimer) { clearInterval(_monitorTimer); _monitorTimer = null; }
+        // ---- User Drill-down ----
+        let _expandedIp = null;
+        let _histLoading = false;
+
+        function renderUsers(json) {
+            var body = document.getElementById('userBody');
+            var note = document.getElementById('userAuthNote');
+            if (!body) return;
+            if (!json.success && json.error === 'Unauthorized') {
+                body.innerHTML = '<tr class="gp-empty"><td colspan="8">需要管理员权限</td></tr>';
+                if (note) note.style.display = 'block';
+                return;
+            }
+            if (note) note.style.display = 'none';
+            var users = json.users || [];
+            if (!users.length) {
+                body.innerHTML = '<tr class="gp-empty"><td colspan="8">暂无用户记录 (有用户发起搜索后显示)</td></tr>';
+                return;
+            }
+            var html = '';
+            users.forEach(function(u) {
+                var statusBadge = u.active_now
+                    ? '<span class="badge live">● 在途</span>'
+                    : '<span class="badge idle">空闲</span>';
+                var errBadge = u.errors > 0
+                    ? ' <span class="badge err" title="错误搜索次数">' + u.errors + '</span>'
+                    : '';
+                var share = u.active_now
+                    ? '<span class="mon-bar"><span class="mon-bar-fill" style="width:' + Math.min(100, u.gpu_share_percent || 0) + '%"></span></span>'
+                        + '<span class="gp-share-val">' + (u.gpu_share_percent || 0).toFixed(0) + '%</span>'
+                    : '<span style="color:var(--text-light);">--</span>';
+                html += '<tr class="user-row" data-ip="' + _esc(u.ip) + '">'
+                    + '<td>' + statusBadge + '</td>'
+                    + '<td class="user-ip">' + _esc(u.ip) + '</td>'
+                    + '<td>' + (u.count || 0) + ' 次' + errBadge + '</td>'
+                    + '<td>' + (u.errors || 0) + '</td>'
+                    + '<td class="gp-share">' + share + '</td>'
+                    + '<td class="gp-stage">' + _esc(u.active_stage || '-') + '</td>'
+                    + '<td>' + _esc(u.last_ts || '-') + '</td>'
+                    + '<td><a class="log-link" href="/monitoring/user_log?ip=' + encodeURIComponent(u.ip)
+                    + '" target="_blank" onclick="event.stopPropagation()">打开日志</a></td>'
+                    + '</tr>';
+                if (_expandedIp === u.ip) {
+                    html += '<tr class="user-detail-row"><td colspan="8"><div class="user-detail" id="detail_' + _esc(u.ip) + '">加载历史...</div></td></tr>';
+                }
+            });
+            body.innerHTML = html;
+
+            var rows = body.querySelectorAll('tr.user-row');
+            for (var i = 0; i < rows.length; i++) {
+                rows[i].addEventListener('click', function() {
+                    var ip = this.getAttribute('data-ip');
+                    if (_expandedIp === ip) {
+                        _expandedIp = null;
+                    } else {
+                        _expandedIp = ip;
+                        loadUserHistory(ip);
+                    }
+                    refreshUsers();
+                });
+            }
+
+            if (_expandedIp) loadUserHistory(_expandedIp);
+        }
+
+        function modeClass(mode) {
+            if (mode === 'error') return 'error';
+            if (mode === 'rule') return 'rule';
+            return '';
+        }
+
+        function loadUserHistory(ip) {
+            if (_histLoading) return;
+            _histLoading = true;
+            fetch('/api/monitoring/user_log?ip=' + encodeURIComponent(ip) + '&limit=30')
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    _histLoading = false;
+                    var box = document.getElementById('detail_' + ip);
+                    if (!box) return;
+                    if (!res.success) {
+                        box.innerHTML = '<span style="color:var(--warning);">历史记录需要管理员权限。</span>';
+                        return;
+                    }
+                    var entries = res.entries || [];
+                    if (!entries.length) {
+                        box.innerHTML = '<span style="color:var(--text-light);">该用户暂无搜索记录。</span>';
+                        return;
+                    }
+                    var html = '<div style="font-size:12px;color:var(--text-secondary);">最近 ' + entries.length
+                        + ' 条搜索 (完整日志点击右侧"打开日志")</div>'
+                        + '<table class="hist-table"><thead><tr><th>时间</th><th>模式</th><th>提问</th><th>SQL</th><th>结果</th><th>耗时</th></tr></thead><tbody>';
+                    entries.forEach(function(e) {
+                        html += '<tr>'
+                            + '<td style="white-space:nowrap;">' + _esc(e.ts ? e.ts.slice(5) : '') + '</td>'
+                            + '<td><span class="mode-tag ' + modeClass(e.mode) + '">' + _esc(e.mode || '-') + '</span></td>'
+                            + '<td class="hist-q" title="' + _esc(e.query) + '">' + _esc(e.query) + '</td>'
+                            + '<td class="hist-sql" title="' + _esc(e.sql) + '">' + _esc(e.sql || '') + '</td>'
+                            + '<td style="white-space:nowrap;">' + (e.result_count != null ? e.result_count + ' 行' : '-')
+                            + (!e.ok ? ' <span class="badge err">ERR</span>' : '') + '</td>'
+                            + '<td style="white-space:nowrap;">' + (e.duration_ms || 0) + 'ms</td>'
+                            + '</tr>';
+                    });
+                    html += '</tbody></table>';
+                    box.innerHTML = html;
+                })
+                .catch(function() { _histLoading = false; });
+        }
+
+        function refreshUsers() {
+            fetch('/api/monitoring/users')
+                .then(function(r) { return r.json(); })
+                .then(renderUsers)
+                .catch(function() {});
+        }
+
+        // ---- Polling Control ----
+        function startFullMonitor() {
+            stopFullMonitor();
+            if (_monStartTime == null) _monStartTime = Date.now();
+            initMonitorCharts();
+            loadMonHistory();
+            fetchMetrics();
+            refreshGpuPanel();
+            refreshUsers();
+            _monMetricsTimer = setInterval(fetchMetrics, 5000);
+            _monGpuTimer = setInterval(refreshGpuPanel, 2000);
+            _monUsersTimer = setInterval(refreshUsers, 5000);
+
+            // 图表在隐藏 tab 中初始化尺寸为 0 → 切到监控 tab 后强制 resize 一次
+            setTimeout(function() {
+                if (_cpuGpuChart) _cpuGpuChart.resize();
+                if (_memChart) _memChart.resize();
+                if (_reqChart) _reqChart.resize();
+                if (_activeChart) _activeChart.resize();
+            }, 50);
+
+            var drillCard = document.getElementById('userDrillCard');
+            if (drillCard && !drillCard._monBound) {
+                drillCard._monBound = true;
+                drillCard.addEventListener('click', function() {
+                    var anchor = document.getElementById('userDetailAnchor');
+                    if (anchor) anchor.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                });
+            }
+        }
+
+        function stopFullMonitor() {
+            if (_monMetricsTimer) { clearInterval(_monMetricsTimer); _monMetricsTimer = null; }
+            if (_monGpuTimer) { clearInterval(_monGpuTimer); _monGpuTimer = null; }
+            if (_monUsersTimer) { clearInterval(_monUsersTimer); _monUsersTimer = null; }
         }
 
         // ===== File Upload & Analyze =====
