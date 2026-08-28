@@ -35,6 +35,50 @@ def _get_lb():
         _lb_cache[0] = False
         return None
 
+# ============ 双引擎管理器 (Ollama / vLLM, 懒加载) ============
+_em_cache = [None]
+def _get_engine_manager():
+    """获取 LLM 双引擎管理器单例 (失败返回 None, 不影响 Ollama 旧路径)。"""
+    if _em_cache[0] is False:
+        return None
+    if _em_cache[0] is not None:
+        return _em_cache[0]
+    try:
+        from llm_engine import get_engine_manager
+        _em_cache[0] = get_engine_manager()
+        return _em_cache[0]
+    except Exception as e:
+        print(f"[Agent] LLM engine manager unavailable: {e}")
+        _em_cache[0] = False
+        return None
+
+
+class EngineChatAdapter:
+    """双引擎适配器: 对外暴露与 OllamaAgent 一致的 chat() 接口。
+
+    内部委托 EngineManager.chat(), 由管理器负责:
+    Ollama/vLLM 路由、无缝切换排队、故障自动转移、在途计数与监控指标。
+    """
+
+    def __init__(self):
+        self.em = _get_engine_manager()
+
+    @property
+    def available(self):
+        if self.em is None:
+            return False
+        try:
+            return self.em.is_healthy('vllm') or self.em.is_healthy('ollama')
+        except Exception:
+            return False
+
+    def chat(self, messages, system_prompt=None, temperature=0.3):
+        if self.em is None:
+            raise RuntimeError("LLM 引擎管理器不可用")
+        return self.em.chat(messages, system_prompt=system_prompt,
+                            temperature=temperature)
+
+
 # ============ 配置 ============
 
 # 当前语言: 'zh' 或 'en'
@@ -1142,6 +1186,7 @@ class AgentManager:
         self.ollama_agent = OllamaAgent()
         self.cloud_agent = CloudAgent()
         self.rule_agent = RuleBasedAgent()
+        self.engine_agent = EngineChatAdapter()
         self.use_ollama = self.ollama_agent.available
         print(f"[Agent] Mode: {'Ollama' if self.use_ollama else 'Rule-based'} | Backend: {_compute_backend}")
 
@@ -1156,13 +1201,23 @@ class AgentManager:
         return self.cloud_agent.available
 
     def get_active_agent(self):
-        """获取当前活跃的AI智能体和模式名称"""
+        """获取当前活跃的AI智能体和模式名称。
+
+        本地算力优先走双引擎管理器 (Ollama / vLLM 自动路由 + 故障转移),
+        返回模式名以管理器当前 active 引擎为准 ('ollama' / 'vllm')。
+        """
         if _compute_backend == 'cloud' and self.cloud_agent.available:
             return self.cloud_agent, 'cloud'
-        elif _compute_backend == 'local' and self.use_ollama:
-            return self.ollama_agent, 'ollama'
-        else:
-            return self.rule_agent, 'rule'
+        elif _compute_backend == 'local':
+            em = _get_engine_manager()
+            if em is not None:
+                # 双引擎: 只要有一个引擎健康即可服务
+                if em.is_healthy('vllm') or em.is_healthy('ollama'):
+                    return self.engine_agent, em.active
+            # 引擎管理器不可用时回退旧 Ollama 直连路径
+            if self.use_ollama:
+                return self.ollama_agent, 'ollama'
+        return self.rule_agent, 'rule'
 
     def switch_model(self, model_name):
         """切换本地模型"""
@@ -1170,6 +1225,20 @@ class AgentManager:
         self.ollama_agent.model = model_name
         self.use_ollama = self.ollama_agent.available
         return self.use_ollama
+
+    def switch_engine(self, target):
+        """一键无缝切换 LLM 引擎 (ollama / vllm)。返回 (success, message)。"""
+        em = _get_engine_manager()
+        if em is None:
+            return False, "LLM 引擎管理器不可用"
+        return em.switch_engine(target)
+
+    def engine_status(self):
+        """返回双引擎状态快照 (供 API/前端)。"""
+        em = _get_engine_manager()
+        if em is None:
+            return None
+        return em.status()
 
     def process_query(self, user_query, lang='zh', history=None):
         """处理用户查询。
@@ -1187,8 +1256,8 @@ class AgentManager:
         # 2. 获取活跃智能体
         active_agent, mode = self.get_active_agent()
 
-        # 3. 若有 LLM, 走 NL2SQL 主路径
-        if mode in ('ollama', 'cloud'):
+        # 3. 若有 LLM, 走 NL2SQL 主路径 (ollama / vllm / cloud)
+        if mode in ('ollama', 'cloud', 'vllm'):
             try:
                 result = self._nl2sql_search(active_agent, user_query, history)
                 if result is not None:

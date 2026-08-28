@@ -20,6 +20,49 @@ def norm(value) -> str:
     return str(value).strip()
 
 
+# Raw status values that are placeholders / data-entry errors, not categories.
+#  - 'null'/'none'/'nan': source cells literally contain the word "null" (export artifact)
+#  - values containing '|': a few rows have pipe-joined IDs/step codes mis-entered into
+#    the status column (e.g. 'A0009904362 | A0009913700 | ...' in FAV Status Short,
+#    'AG1_PRO1_Fuz | AG1_PRO2_Fuz' in ProzessStatusDetail) — these are not statuses.
+_STATUS_INVALID = {'', 'null', 'none', 'nan', '-'}
+
+
+def _valid_status(value: str) -> bool:
+    """A status cell is only a real category if non-empty, not a literal 'null'
+    placeholder and not a pipe-joined aggregate (data-entry error)."""
+    v = norm(value)
+    return v.lower() not in _STATUS_INVALID and '|' not in v
+
+
+# Display labels (English) for source status values. The ENIGMA export keeps
+# EC status (ProzessStatusDetail) in German; ZEUS/FAV statuses use internal
+# codes plus two German words. Everything is normalized to English labels so
+# the dashboard shows source categories in English regardless of source locale.
+STATUS_LABELS = {
+    # EC / ProzessStatusDetail (German workflow phase -> English)
+    'Umsetzung': 'Implementation',
+    'Abgeschlossen': 'Completed',
+    'Bewertung': 'Evaluation',
+    'Detaillierung': 'Detailing',
+    'Entscheidung': 'Decision',
+    'Verteilung': 'Distribution',
+    # ZEUS / FAV Status Short
+    'Erledigt': 'Resolved',
+    'Abgebrochen': 'Cancelled',
+}
+
+
+def status_label(business_key: str, raw_value: str) -> str:
+    """Map a raw source status value to its English display label.
+    Known German words/codes get explicit English labels; language-neutral
+    internal codes (AE/OWP/BE/UA/KÄ/ÜW...) are returned unchanged."""
+    v = norm(raw_value)
+    if v in STATUS_LABELS:
+        return STATUS_LABELS[v]
+    return v
+
+
 def business_column(business_key: str) -> str:
     """Map a business key to the unified (English) column name."""
     return DELTA_BUSINESS_FIELDS.get(business_key, business_key)
@@ -282,12 +325,19 @@ class StageCatalog:
         }
 
     def status_distribution(self, business_key: str) -> List[dict]:
-        """Value distribution of a business field (pie charts), empty values
-        skipped, sorted by count descending. API shape: [{name, value}]."""
+        """Value distribution of a status field (pie charts).
+
+        Placeholder cells (literal 'null'), empty cells and pipe-joined
+        data-entry errors are skipped; raw source values are mapped to
+        English display labels. Sorted by count descending.
+        API shape: [{name, value}].
+        """
         counts: Dict[str, int] = {}
         for part in self.parts.values():
-            value = part.value(business_key)
-            if value:
-                counts[value] = counts.get(value, 0) + 1
+            raw = part.value(business_key)
+            if not _valid_status(raw):
+                continue
+            label = status_label(business_key, raw)
+            counts[label] = counts.get(label, 0) + 1
         items = sorted(counts.items(), key=lambda x: x[1], reverse=True)
         return [{'name': n, 'value': c} for n, c in items]

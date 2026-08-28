@@ -2172,11 +2172,13 @@ class DatabaseManager:
         fav_pie_to2 = catalogs['TO2'].status_distribution('fav_status')
 
         # === 4. 柱状折线图数据 ===
+        # 以 PN 对齐: 每个阶段统计该阶段 BOM 内所有 PN 关联的去重 EC
+        # (Bundle Number) 数量与 ZEUS/FAV 数量 (ec_count/fav_count)。
         stages_order = ['pre-TO', 'TO1', 'TO2']
         bar_line = {
             'stages': stages_order,
-            'ec_counts': [stage_stats[s]['ec_pn'] for s in stages_order],
-            'fav_counts': [stage_stats[s]['fav_pn'] for s in stages_order],
+            'ec_counts': [stage_stats[s]['ec_count'] for s in stages_order],
+            'fav_counts': [stage_stats[s]['fav_count'] for s in stages_order],
         }
 
         conn.close()

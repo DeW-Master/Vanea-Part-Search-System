@@ -58,6 +58,7 @@ data/*.db-journal
 data/*.db-wal
 data/*.db-shm
 data/cloud_config.json
+data/llm_engine.json
 data/uploads/
 *.db
 *.sqlite

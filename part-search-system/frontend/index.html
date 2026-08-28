@@ -815,6 +815,77 @@
     .new-chat-btn:hover { border-color: var(--silver-dark); color: var(--text); background: var(--bg-alt); }
     .new-chat-btn svg { width: 14px; height: 14px; }
 
+    /* ---------- LLM 双引擎切换器 ---------- */
+    .engine-switcher {
+      display: inline-flex; align-items: center; gap: 2px;
+      padding: 2px; border: 1px solid var(--border-bright);
+      border-radius: var(--radius-sm); background: var(--bg-alt);
+    }
+    .engine-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 12px; border: none; background: transparent;
+      color: var(--text-light); font-size: 12px; font-weight: 600;
+      cursor: pointer; font-family: inherit; border-radius: calc(var(--radius-sm) - 1px);
+      transition: all 0.15s;
+    }
+    .engine-btn:hover { color: var(--text); background: var(--card-bg); }
+    .engine-btn.active {
+      background: var(--card-bg); color: var(--text);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    }
+    .engine-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .engine-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--text-light); flex-shrink: 0;
+    }
+    .engine-dot.healthy { background: var(--success); box-shadow: 0 0 0 2px var(--success-light); }
+    .engine-dot.unhealthy { background: var(--danger, #e5484d); box-shadow: 0 0 0 2px rgba(229,72,77,0.15); }
+    .engine-dot.switching { background: var(--warning); animation: engine-pulse 1s infinite; }
+    @keyframes engine-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+    /* 超时分级提示横幅 */
+    .agent-timeout-banner {
+      display: none; align-items: center; gap: 8px;
+      margin: 0 16px 8px; padding: 8px 14px;
+      border-radius: var(--radius-sm); font-size: 12px; font-weight: 500;
+      border: 1px solid var(--warning); background: var(--warning-light); color: var(--warning);
+    }
+    .agent-timeout-banner.show { display: flex; }
+    .agent-timeout-banner.critical { border-color: var(--danger, #e5484d); background: rgba(229,72,77,0.1); color: var(--danger, #e5484d); }
+    .agent-timeout-banner svg { width: 15px; height: 15px; flex-shrink: 0; }
+    .agent-timeout-banner .banner-progress {
+      display: none; flex: 1; height: 4px; min-width: 80px;
+      background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden;
+    }
+    .agent-timeout-banner.recovering .banner-progress { display: block; }
+    .agent-timeout-banner .banner-progress .bar {
+      width: 40%; height: 100%; border-radius: 2px;
+      background: currentColor; opacity: 0.7;
+      animation: banner-indeterminate 1.2s ease-in-out infinite;
+    }
+    @keyframes banner-indeterminate {
+      0% { transform: translateX(-120%); }
+      100% { transform: translateX(320%); }
+    }
+
+    /* ---------- LLM 引擎/GPU 实时监控条 ---------- */
+    .engine-monitor {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 16px;
+      margin: 0 16px 8px; padding: 6px 14px;
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--bg-alt); font-size: 11px; color: var(--text-light);
+    }
+    .engine-monitor .mon-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .engine-monitor .mon-label { color: var(--text-light); }
+    .engine-monitor .mon-val { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .engine-monitor .mon-bar {
+      width: 70px; height: 5px; border-radius: 3px;
+      background: rgba(255,255,255,0.08); overflow: hidden;
+    }
+    .engine-monitor .mon-bar-fill { height: 100%; border-radius: 3px; background: var(--success); transition: width 0.5s ease; }
+    .engine-monitor .mon-bar-fill.warn { background: var(--warning); }
+    .engine-monitor .mon-bar-fill.hot { background: var(--danger); }
+    .engine-monitor .mon-sep { width: 1px; height: 14px; background: var(--border-bright); }
+
     /* ==================== Search Tab ==================== */
     .search-container {
       background: var(--card-bg);
@@ -2736,12 +2807,47 @@
             </select>
           </div>
           <div class="model-bar-right">
+            <div class="engine-switcher" id="engineSwitcher" title="切换大模型推理引擎">
+              <button class="engine-btn" id="engineOllamaBtn" onclick="switchEngine('ollama')">
+                <span class="engine-dot" id="ollamaDot"></span>
+                <span data-i18n="engineOllama">Ollama</span>
+              </button>
+              <button class="engine-btn" id="engineVllmBtn" onclick="switchEngine('vllm')">
+                <span class="engine-dot" id="vllmDot"></span>
+                <span data-i18n="engineVllm">vLLM</span>
+              </button>
+            </div>
             <button class="new-chat-btn" onclick="newChat()" id="newChatBtn" title="新对话">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
               <span data-i18n="newChat">新对话</span>
             </button>
             <span class="model-mode" id="modelMode"></span>
           </div>
+        </div>
+        <!-- vLLM/规则模式状态横幅 (异常提示 + 恢复进度) -->
+        <div class="agent-timeout-banner" id="engineNoticeBanner">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <span id="engineNoticeText"></span>
+          <div class="banner-progress"><div class="bar"></div></div>
+        </div>
+        <!-- 引擎调用 / 显卡资源实时监控条 -->
+        <div class="engine-monitor" id="engineMonitor">
+          <span class="mon-item"><span class="mon-label">当前引擎</span><span class="mon-val" id="monActiveEngine">--</span></span>
+          <span class="mon-sep"></span>
+          <span class="mon-item"><span class="mon-label">GPU 利用率</span>
+            <span class="mon-bar"><span class="mon-bar-fill" id="monGpuUtilBar"></span></span>
+            <span class="mon-val" id="monGpuUtil">--</span>
+          </span>
+          <span class="mon-item"><span class="mon-label">显存</span>
+            <span class="mon-bar"><span class="mon-bar-fill" id="monGpuMemBar"></span></span>
+            <span class="mon-val" id="monGpuMem">--</span>
+          </span>
+          <span class="mon-item"><span class="mon-label">温度</span><span class="mon-val" id="monGpuTemp">--</span></span>
+          <span class="mon-sep"></span>
+          <span class="mon-item"><span class="mon-label">vLLM 调用</span><span class="mon-val" id="monVllmCalls">0</span></span>
+          <span class="mon-item"><span class="mon-label">Ollama 调用</span><span class="mon-val" id="monOllamaCalls">0</span></span>
+          <span class="mon-item"><span class="mon-label">在途请求</span><span class="mon-val" id="monInflight">0</span></span>
+          <span class="mon-item"><span class="mon-label">Ollama 显存</span><span class="mon-val" id="monOllamaVram">--</span></span>
         </div>
         <div class="chat-messages" id="chatMessages"></div>
         <div class="chat-scroll-tip" id="chatScrollTip">
@@ -3697,21 +3803,21 @@
         kpi: { newPn: null, zgs: null, ec: null, kem: null, soma: null },
         // EC status distribution (TO1-era data)
         ecPie: [
-          { value: 2599, name: 'Umsetzung (实施中)', itemStyle: { color: '#3b82f6' } },
-          { value: 0, name: 'Abgeschlossen (已完结)', itemStyle: { color: '#10b981' } },
-          { value: 0, name: 'Bewertung (评估中)', itemStyle: { color: '#f59e0b' } },
-          { value: 0, name: 'Detaillierung (详细设计中)', itemStyle: { color: '#06b6d4' } },
-          { value: 0, name: 'Entscheidung (决策中)', itemStyle: { color: '#8b5cf6' } },
-          { value: 0, name: 'Verteilung (分发中)', itemStyle: { color: '#14b8a6' } }
+          { value: 2599, name: 'Implementation', itemStyle: { color: '#3b82f6' } },
+          { value: 0, name: 'Completed', itemStyle: { color: '#10b981' } },
+          { value: 0, name: 'Evaluation', itemStyle: { color: '#f59e0b' } },
+          { value: 0, name: 'Detailing', itemStyle: { color: '#06b6d4' } },
+          { value: 0, name: 'Decision', itemStyle: { color: '#8b5cf6' } },
+          { value: 0, name: 'Distribution', itemStyle: { color: '#14b8a6' } }
         ],
         // ZEUS status distribution (TO1-era data)
         zeusPie: [
-          { value: 469, name: 'Erledigt (已解决)', itemStyle: { color: '#10b981' } },
-          { value: 0, name: 'KÄ (纠正措施)', itemStyle: { color: '#f59e0b' } },
-          { value: 0, name: 'AE (异常)', itemStyle: { color: '#ef4444' } },
-          { value: 0, name: 'OWP (待处理)', itemStyle: { color: '#3b82f6' } },
-          { value: 0, name: 'Abgebrochen (已取消)', itemStyle: { color: '#64748b' } },
-          { value: 0, name: 'BE/UA/FW (其他)', itemStyle: { color: '#8b5cf6' } }
+          { value: 469, name: 'Resolved', itemStyle: { color: '#10b981' } },
+          { value: 0, name: 'KÄ', itemStyle: { color: '#f59e0b' } },
+          { value: 0, name: 'AE', itemStyle: { color: '#ef4444' } },
+          { value: 0, name: 'OWP', itemStyle: { color: '#3b82f6' } },
+          { value: 0, name: 'Cancelled', itemStyle: { color: '#64748b' } },
+          { value: 0, name: 'BE', itemStyle: { color: '#8b5cf6' } }
         ]
       },
       delta2: {
@@ -3719,21 +3825,21 @@
         kpi: { newPn: 642, zgs: 1280, ec: 2551, kem: 320, soma: 310 },
         // EC status distribution (full data)
         ecPie: [
-          { value: 6136, name: 'Umsetzung (实施中)', itemStyle: { color: '#3b82f6' } },
-          { value: 1096, name: 'Abgeschlossen (已完结)', itemStyle: { color: '#10b981' } },
-          { value: 398, name: 'Bewertung (评估中)', itemStyle: { color: '#f59e0b' } },
-          { value: 149, name: 'Detaillierung (详细设计中)', itemStyle: { color: '#06b6d4' } },
-          { value: 58, name: 'Entscheidung (决策中)', itemStyle: { color: '#8b5cf6' } },
-          { value: 32, name: 'Verteilung (分发中)', itemStyle: { color: '#14b8a6' } }
+          { value: 6136, name: 'Implementation', itemStyle: { color: '#3b82f6' } },
+          { value: 1096, name: 'Completed', itemStyle: { color: '#10b981' } },
+          { value: 398, name: 'Evaluation', itemStyle: { color: '#f59e0b' } },
+          { value: 149, name: 'Detailing', itemStyle: { color: '#06b6d4' } },
+          { value: 58, name: 'Decision', itemStyle: { color: '#8b5cf6' } },
+          { value: 32, name: 'Distribution', itemStyle: { color: '#14b8a6' } }
         ],
         // ZEUS status distribution (full data)
         zeusPie: [
-          { value: 1057, name: 'Erledigt (已解决)', itemStyle: { color: '#10b981' } },
-          { value: 316, name: 'KÄ (纠正措施)', itemStyle: { color: '#f59e0b' } },
-          { value: 202, name: 'AE (异常)', itemStyle: { color: '#ef4444' } },
-          { value: 48, name: 'OWP (待处理)', itemStyle: { color: '#3b82f6' } },
-          { value: 25, name: 'Abgebrochen (已取消)', itemStyle: { color: '#64748b' } },
-          { value: 28, name: 'BE/UA/FW (其他)', itemStyle: { color: '#8b5cf6' } }
+          { value: 1057, name: 'Resolved', itemStyle: { color: '#10b981' } },
+          { value: 316, name: 'KÄ', itemStyle: { color: '#f59e0b' } },
+          { value: 202, name: 'AE', itemStyle: { color: '#ef4444' } },
+          { value: 48, name: 'OWP', itemStyle: { color: '#3b82f6' } },
+          { value: 25, name: 'Cancelled', itemStyle: { color: '#64748b' } },
+          { value: 28, name: 'BE', itemStyle: { color: '#8b5cf6' } }
         ]
       }
     };
@@ -3742,39 +3848,37 @@
     var _deltaApiData = null;
 
     // EC status color mapping (by name prefix)
+    // EC status color mapping — keys are the English display labels returned
+    // by the backend (source ProzessStatusDetail German values mapped server-side).
     var _deltaEcColorMap = {
-      'Umsetzung': '#3b82f6',
-      'Abgeschlossen': '#10b981',
-      'Bewertung': '#f59e0b',
-      'Detaillierung': '#06b6d4',
-      'Entscheidung': '#8b5cf6',
-      'Verteilung': '#14b8a6'
+      'Implementation': '#3b82f6',
+      'Completed': '#10b981',
+      'Evaluation': '#f59e0b',
+      'Detailing': '#06b6d4',
+      'Decision': '#8b5cf6',
+      'Distribution': '#14b8a6'
     };
 
-    // ZEUS status color mapping (by name prefix)
+    // ZEUS (FAV) status color mapping — English labels plus internal codes.
     var _deltaZeusColorMap = {
-      'Erledigt': '#10b981',
+      'Resolved': '#10b981',
       'KÄ': '#f59e0b',
       'AE': '#ef4444',
       'OWP': '#3b82f6',
-      'Abgebrochen': '#64748b',
-      'BE/UA/FW': '#8b5cf6'
+      'Cancelled': '#64748b',
+      'BE': '#8b5cf6',
+      'UA': '#a855f7',
+      'ÜW': '#ec4899'
     };
 
-    // Helper: get EC color by name (matches prefix)
+    // Helper: get EC color by label (exact match, fallback grey)
     function _getEcColor(name) {
-      for (var key in _deltaEcColorMap) {
-        if (name.indexOf(key) === 0) return _deltaEcColorMap[key];
-      }
-      return '#6b7280';
+      return _deltaEcColorMap[name] || '#6b7280';
     }
 
-    // Helper: get ZEUS color by name (matches prefix)
+    // Helper: get ZEUS color by label (exact match, fallback grey)
     function _getZeusColor(name) {
-      for (var key in _deltaZeusColorMap) {
-        if (name.indexOf(key) === 0) return _deltaZeusColorMap[key];
-      }
-      return '#6b7280';
+      return _deltaZeusColorMap[name] || '#6b7280';
     }
 
     // Helper: get current delta data source (API if available, else mock)
@@ -4769,8 +4873,10 @@
       // This chart does NOT change with Delta switch
       // Get data from API or use default fallback
       var stages = ['pre-TO', 'TO1', 'TO2'];
-      var ecCounts = [0, 1980, 2022];
-      var favCounts = [0, 694, 699];
+      // Fallback: distinct EC (Bundle Number) / ZEUS (FAV) counts aligned on
+      // each stage's PN set (same metric the backend bar_line provides).
+      var ecCounts = [2403, 2600, 2552];
+      var favCounts = [421, 471, 471];
 
       if (_deltaApiData && _deltaApiData.bar_line) {
         stages = _deltaApiData.bar_line.stages;
@@ -4778,45 +4884,9 @@
         favCounts = _deltaApiData.bar_line.fav_counts;
       }
 
-      // Build bar data: first item (pre-TO) is dashed with "无数据" label
-      var ecBarData = ecCounts.map(function(val, i) {
-        if (i === 0) {
-          return {
-            value: 0,
-            itemStyle: {
-              color: 'transparent',
-              borderColor: '#3b82f6',
-              borderWidth: 1,
-              borderType: 'dashed',
-              borderRadius: [3, 3, 0, 0]
-            },
-            label: {
-              show: true,
-              position: 'top',
-              formatter: t('pieNoData'),
-              color: '#6b7280',
-              fontSize: 10
-            }
-          };
-        }
-        return val;
-      });
-
-      var favBarData = favCounts.map(function(val, i) {
-        if (i === 0) {
-          return {
-            value: 0,
-            itemStyle: {
-              color: 'transparent',
-              borderColor: '#8b5cf6',
-              borderWidth: 1,
-              borderType: 'dashed',
-              borderRadius: [3, 3, 0, 0]
-            }
-          };
-        }
-        return val;
-      });
+      // Bars show the real PN-aligned counts for all three stages (incl. pre-TO).
+      var ecBarData = ecCounts;
+      var favBarData = favCounts;
 
       _deltaCharts.barLine.setOption({
         backgroundColor: 'transparent',
@@ -5626,6 +5696,193 @@
       }
     }
 
+    // ==================== LLM 引擎切换 / 监控 ====================
+    var _enginePollTimer = null;
+    var _engineSwitching = false;
+    var _lastRecoveryState = 'idle';
+
+    async function switchEngine(target) {
+      if (_engineSwitching) return;
+      var btn = document.getElementById(target === 'vllm' ? 'engineVllmBtn' : 'engineOllamaBtn');
+      var other = document.getElementById(target === 'vllm' ? 'engineOllamaBtn' : 'engineVllmBtn');
+      _engineSwitching = true;
+      if (btn) btn.disabled = true;
+      if (other) other.disabled = true;
+      showToast(currentLang === 'zh' ? '正在切换到 ' + target + ' 引擎, 请求排队处理中 ...' : 'Switching to ' + target + ' ...', 'info', 2500);
+      try {
+        var res = await fetch('/api/agent/engine', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ engine: target })
+        });
+        var json = await res.json();
+        if (json.success) {
+          showToast((json.message || (currentLang === 'zh' ? '已切换到 ' : 'Switched to ') + target), 'success', 3500);
+          if (json.engine) renderEngineStatus(json.engine);
+        } else {
+          showToast((currentLang === 'zh' ? '切换失败: ' : 'Switch failed: ') + (json.error || json.message || 'unknown'), 'error', 5000);
+        }
+      } catch (e) {
+        showToast(currentLang === 'zh' ? '切换请求失败, 请检查后端服务' : 'Switch request failed', 'error', 5000);
+      } finally {
+        _engineSwitching = false;
+        if (btn) btn.disabled = false;
+        if (other) other.disabled = false;
+        refreshEngineStatus();
+      }
+    }
+
+    function _setDot(id, cls) {
+      var el = document.getElementById(id);
+      if (el) el.className = 'engine-dot ' + cls;
+    }
+
+    function _monBarColor(pct) {
+      if (pct >= 90) return 'hot';
+      if (pct >= 70) return 'warn';
+      return '';
+    }
+
+    function _setBar(id, pct) {
+      var fill = document.getElementById(id);
+      if (!fill) return;
+      fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+      fill.className = 'mon-bar-fill ' + _monBarColor(pct);
+    }
+
+    function _showEngineBanner(kind, text, recovering) {
+      var banner = document.getElementById('engineNoticeBanner');
+      var txt = document.getElementById('engineNoticeText');
+      if (!banner || !txt) return;
+      if (!kind) {
+        banner.classList.remove('show', 'critical', 'recovering');
+        txt.textContent = '';
+        return;
+      }
+      txt.textContent = text;
+      banner.classList.add('show');
+      banner.classList.toggle('critical', kind === 'critical');
+      banner.classList.toggle('recovering', !!recovering);
+    }
+
+    function renderEngineStatus(st) {
+      if (!st) return;
+      var engines = st.engines || {};
+      var ollama = engines.ollama || {};
+      var vllm = engines.vllm || {};
+      var active = st.active || 'rule';
+      var switching = !!st.switching;
+
+      // 按钮 active 态
+      var ob = document.getElementById('engineOllamaBtn');
+      var vb = document.getElementById('engineVllmBtn');
+      if (ob) ob.classList.toggle('active', active === 'ollama' && !switching);
+      if (vb) vb.classList.toggle('active', active === 'vllm' && !switching);
+
+      // 健康圆点 (切换中 -> 黄色脉冲)
+      if (switching) {
+        _setDot('ollamaDot', 'switching');
+        _setDot('vllmDot', 'switching');
+      } else {
+        _setDot('ollamaDot', ollama.healthy ? 'healthy' : 'unhealthy');
+        _setDot('vllmDot', vllm.healthy ? 'healthy' : 'unhealthy');
+      }
+
+      // 监控条: 当前引擎
+      var activeLabel = active === 'vllm' ? 'vLLM' : (active === 'ollama' ? 'Ollama' : (currentLang === 'zh' ? '规则模式' : 'Rule mode'));
+      var monActive = document.getElementById('monActiveEngine');
+      if (monActive) monActive.textContent = activeLabel + (switching ? (currentLang === 'zh' ? ' (切换中)' : ' (switching)') : '');
+
+      // 监控条: GPU
+      var gpu = st.gpu || {};
+      if (gpu.available) {
+        var util = Math.round(gpu.utilization_percent || 0);
+        var memPct = Math.round(gpu.memory_percent || 0);
+        _setBar('monGpuUtilBar', util);
+        _setBar('monGpuMemBar', memPct);
+        var u = document.getElementById('monGpuUtil');
+        var m = document.getElementById('monGpuMem');
+        var tp = document.getElementById('monGpuTemp');
+        if (u) u.textContent = util + '%';
+        if (m) m.textContent = Math.round(gpu.memory_used_mb || 0) + '/' + Math.round(gpu.memory_total_mb || 0) + ' MiB (' + memPct + '%)';
+        if (tp) tp.textContent = Math.round(gpu.temperature_c || 0) + '°C';
+      } else {
+        _setBar('monGpuUtilBar', 0);
+        _setBar('monGpuMemBar', 0);
+        var u2 = document.getElementById('monGpuUtil');
+        var m2 = document.getElementById('monGpuMem');
+        var tp2 = document.getElementById('monGpuTemp');
+        if (u2) u2.textContent = currentLang === 'zh' ? '不可用' : 'N/A';
+        if (m2) m2.textContent = currentLang === 'zh' ? '不可用' : 'N/A';
+        if (tp2) tp2.textContent = '--';
+      }
+
+      // 监控条: 调用数 / 在途
+      var vc = document.getElementById('monVllmCalls');
+      var oc = document.getElementById('monOllamaCalls');
+      var inf = document.getElementById('monInflight');
+      if (vc) vc.textContent = String(vllm.request_total || 0) + ((vllm.request_failed || 0) ? ' (失败' + vllm.request_failed + ')' : '');
+      if (oc) oc.textContent = String(ollama.request_total || 0) + ((ollama.request_failed || 0) ? ' (失败' + ollama.request_failed + ')' : '');
+      if (inf) inf.textContent = String((vllm.inflight || 0) + (ollama.inflight || 0));
+
+      // Ollama 显存驻留: vLLM 承载流量时模型应已卸载释放显存
+      var ov = document.getElementById('monOllamaVram');
+      if (ov) {
+        var loaded = ollama.loaded_models || [];
+        if (!ollama.healthy) {
+          ov.textContent = '离线'; ov.style.color = 'var(--text-light)'; ov.title = '';
+        } else if (loaded.length) {
+          ov.textContent = '驻留 ' + loaded.length + ' 个模型';
+          ov.style.color = 'var(--warning)';
+          ov.title = loaded.join(', ') + ' (模型加载中, 占用显存; 切换到 vLLM 后会自动卸载)';
+        } else {
+          ov.textContent = '已释放';
+          ov.style.color = 'var(--success)';
+          ov.title = 'Ollama 模型未驻留显存, 显存已让给 vLLM; 故障转移时模型按需重新加载';
+        }
+      }
+
+      // 横幅: 规则模式 / vLLM 恢复 / 切换中
+      var rec = st.vllm_recovery || {};
+      if (st.fallback_mode === 'rule') {
+        var msg = currentLang === 'zh'
+          ? '大模型服务暂不可用, 已自动退回规则模式应答; 系统正在后台恢复大模型服务。'
+          : 'LLM service unavailable, fell back to rule mode. Recovery in progress.';
+        _showEngineBanner('critical', msg, rec.state === 'restarting');
+      } else if (rec.state === 'restarting') {
+        var rmsg = currentLang === 'zh'
+          ? 'vLLM 调用异常, 正在自动重启并恢复 vLLM 模式 (第 ' + (rec.attempts || 1) + ' 次), 期间请求由 Ollama 接管, 请勿重复提交 ...'
+          : 'vLLM error, auto-restarting (attempt ' + (rec.attempts || 1) + '). Requests are served by Ollama meanwhile ...';
+        _showEngineBanner('warn', rmsg, true);
+      } else if (switching) {
+        _showEngineBanner('warn', currentLang === 'zh' ? '引擎切换中, 正在排空在途请求, 服务不中断 ...' : 'Switching engine, draining in-flight requests ...', true);
+      } else {
+        _showEngineBanner(null, '', false);
+      }
+
+      // 恢复完成 (restarting -> idle) 弹一次提示
+      if (_lastRecoveryState === 'restarting' && rec.state === 'idle') {
+        showToast(currentLang === 'zh' ? 'vLLM 已恢复正常, 切换回 vLLM 引擎' : 'vLLM recovered, switching back', 'success', 4000);
+      }
+      _lastRecoveryState = rec.state || 'idle';
+    }
+
+    async function refreshEngineStatus() {
+      try {
+        var res = await fetch('/api/agent/engine');
+        var json = await res.json();
+        if (json.success && json.engine) renderEngineStatus(json.engine);
+      } catch (e) {
+        // 静默: 后端未就绪时不打扰用户
+      }
+    }
+
+    function initEngineMonitor() {
+      refreshEngineStatus();
+      if (_enginePollTimer) clearInterval(_enginePollTimer);
+      _enginePollTimer = setInterval(refreshEngineStatus, 4000);
+    }
+
     // ==================== Suggestions ====================
     function updateChatTip() {
       const tip = document.getElementById('chatScrollTip');
@@ -6152,6 +6409,7 @@
       loadAllPartNumbers();
       loadAgentStatus();
       loadModels();
+      initEngineMonitor();
       renderSearchHistory();
 
       // Initialize delta dashboard (home tab)

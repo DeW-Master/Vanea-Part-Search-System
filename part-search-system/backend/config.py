@@ -150,6 +150,30 @@ OLLAMA_FAILURE_THRESHOLD = int(os.environ.get("OLLAMA_FAILURE_THRESHOLD", "3"))
 # 恢复后多久重新加入
 OLLAMA_RECOVERY_BACKOFF = int(os.environ.get("OLLAMA_RECOVERY_BACKOFF", "60"))
 
+# ============ vLLM 配置 (双引擎: Ollama / vLLM) ============
+# vLLM 提供 OpenAI 兼容 API, 跑在 WSL2 内 (默认 8000 端口)
+VLLM_URL = os.environ.get("VLLM_URL", "http://localhost:8000/v1")
+VLLM_MODEL = os.environ.get("VLLM_MODEL", "qwen3-8b")
+VLLM_API_KEY = os.environ.get("VLLM_API_KEY", "dummy")
+# vLLM 健康检查端点 (根路径, 非 /v1)
+VLLM_HEALTH_URL = os.environ.get("VLLM_HEALTH_URL", "http://localhost:8000/health")
+VLLM_REQUEST_TIMEOUT = int(os.environ.get("VLLM_REQUEST_TIMEOUT", "120"))
+# 引擎偏好: ollama | vllm (运行时可切换, 持久化到 DATA_DIR/llm_engine.json)
+LLM_ENGINE_PREFERRED = os.environ.get("LLM_ENGINE", "ollama").lower()
+# 看门狗: 健康检查间隔 / 连续失败判定 / 卡死重启
+LLM_WATCHDOG_INTERVAL = int(os.environ.get("LLM_WATCHDOG_INTERVAL", "15"))
+LLM_WATCHDOG_FAILURE_THRESHOLD = int(os.environ.get("LLM_WATCHDOG_FAILURE_THRESHOLD", "3"))
+# vLLM 卡死时自动重启 (Windows 后端经 WSL 调用服务脚本)
+VLLM_RESTART_ENABLED = os.environ.get("VLLM_RESTART_ENABLED", "1") == "1"
+# WSL 内路径含空格时经 wsl.exe 传递引号不稳, 统一用无空格软链接
+# (由 scripts/vllm/wsl_setup_link.sh 创建 -> /root/vllm_scripts)
+VLLM_SERVICE_SCRIPT = os.environ.get(
+    "VLLM_SERVICE_SCRIPT",
+    "/root/vllm_scripts/vllm_service.sh",
+)
+# 引擎切换时等待在途请求排空的最长时间 (秒)
+LLM_SWITCH_DRAIN_TIMEOUT = int(os.environ.get("LLM_SWITCH_DRAIN_TIMEOUT", "30"))
+
 # ============ Flask 配置 ============
 SECRET_KEY = os.environ.get("SECRET_KEY", "parts-search-secret-key-2026")
 FLASK_HOST = os.environ.get("FLASK_HOST", "0.0.0.0")

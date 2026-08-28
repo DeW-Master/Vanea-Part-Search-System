@@ -204,6 +204,51 @@ class MetricsManager:
             registry=reg,
         )
 
+        # ---------- LLM 引擎 (Ollama / vLLM 双引擎) ----------
+        self._counters['llm_engine_requests'] = pc.Counter(
+            'llm_engine_requests_total',
+            'LLM engine requests (ollama / vllm)',
+            ['engine', 'model', 'success'] + common_labels,
+            registry=reg,
+        )
+        self._histograms['llm_engine_request_duration'] = pc.Histogram(
+            'llm_engine_request_duration_seconds',
+            'LLM engine request duration',
+            ['engine', 'model'] + common_labels,
+            buckets=(0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0),
+            registry=reg,
+        )
+        self._gauges['llm_engine_active'] = pc.Gauge(
+            'llm_engine_active',
+            'Current active LLM engine (1=vllm, 0=ollama; labeled by engine)',
+            ['engine'] + common_labels,
+            registry=reg,
+        )
+        self._gauges['llm_engine_inflight'] = pc.Gauge(
+            'llm_engine_inflight_requests',
+            'In-flight LLM requests by engine',
+            ['engine'] + common_labels,
+            registry=reg,
+        )
+        self._gauges['llm_engine_healthy'] = pc.Gauge(
+            'llm_engine_healthy',
+            'LLM engine health (1=healthy, 0=down)',
+            ['engine'] + common_labels,
+            registry=reg,
+        )
+        self._counters['llm_engine_switches'] = pc.Counter(
+            'llm_engine_switches_total',
+            'LLM engine switch events',
+            ['from_engine', 'to_engine', 'reason'] + common_labels,
+            registry=reg,
+        )
+        self._counters['llm_engine_restarts'] = pc.Counter(
+            'llm_engine_restarts_total',
+            'LLM engine auto-restart events by watchdog',
+            ['engine', 'result'] + common_labels,
+            registry=reg,
+        )
+
         # ---------- Database ----------
         self._gauges['db_total_records'] = pc.Gauge(
             'db_total_records',
@@ -439,6 +484,70 @@ class MetricsManager:
             self._histograms['ollama_request_duration'] \
                 .labels(*self._common([node, model])) \
                 .observe(duration_sec)
+        except Exception:
+            pass
+
+    # ============== LLM 双引擎 ==============
+    def observe_llm_request(self, engine: str, model: str, success: bool, duration_sec: float = 0.0):
+        if not self.enabled:
+            return
+        try:
+            self._counters['llm_engine_requests'] \
+                .labels(*self._common([engine, model, 'true' if success else 'false'])) \
+                .inc()
+            self._histograms['llm_engine_request_duration'] \
+                .labels(*self._common([engine, model])) \
+                .observe(duration_sec)
+        except Exception:
+            pass
+
+    def set_llm_active(self, engine: str, is_active: bool):
+        if not self.enabled:
+            return
+        try:
+            self._gauges['llm_engine_active'] \
+                .labels(*self._common([engine])) \
+                .set(1 if is_active else 0)
+        except Exception:
+            pass
+
+    def set_llm_inflight(self, engine: str, count: int):
+        if not self.enabled:
+            return
+        try:
+            self._gauges['llm_engine_inflight'] \
+                .labels(*self._common([engine])) \
+                .set(count)
+        except Exception:
+            pass
+
+    def set_llm_healthy(self, engine: str, healthy: bool):
+        if not self.enabled:
+            return
+        try:
+            self._gauges['llm_engine_healthy'] \
+                .labels(*self._common([engine])) \
+                .set(1 if healthy else 0)
+        except Exception:
+            pass
+
+    def inc_llm_switch(self, from_engine: str, to_engine: str, reason: str = 'manual'):
+        if not self.enabled:
+            return
+        try:
+            self._counters['llm_engine_switches'] \
+                .labels(*self._common([from_engine, to_engine, reason])) \
+                .inc()
+        except Exception:
+            pass
+
+    def inc_llm_restart(self, engine: str, result: str):
+        if not self.enabled:
+            return
+        try:
+            self._counters['llm_engine_restarts'] \
+                .labels(*self._common([engine, result])) \
+                .inc()
         except Exception:
             pass
 

@@ -1201,15 +1201,62 @@ def agent_status():
     model_name = None
     if active_mode == 'ollama':
         model_name = getattr(agent_manager.ollama_agent, 'model', None)
+    elif active_mode == 'vllm':
+        try:
+            from config import VLLM_MODEL
+            model_name = VLLM_MODEL
+        except Exception:
+            model_name = 'qwen3-8b'
     elif active_mode == 'cloud':
         model_name = cloud_config.get('model')
+    # 双引擎状态 (Ollama / vLLM 健康度、在途、切换历史)
+    engine_info = None
+    try:
+        engine_info = agent_manager.engine_status()
+    except Exception:
+        engine_info = None
     return jsonify({
         'success': True, 'available': True, 'mode': active_mode,
         'model': model_name,
         'backend': backend,
         'cloud_available': cloud_available,
         'ollama_available': agent_manager.use_ollama,
+        'engine': engine_info,
     })
+
+
+@app.route('/api/agent/engine', methods=['GET'])
+def agent_engine_status():
+    """获取双引擎 (Ollama / vLLM) 状态与模型注册表。"""
+    if not AGENT_AVAILABLE:
+        return jsonify({'success': False, 'error': 'Agent module not loaded'}), 500
+    try:
+        status = agent_manager.engine_status()
+        if status is None:
+            return jsonify({'success': False, 'error': 'Engine manager unavailable'}), 500
+        return jsonify({'success': True, 'engine': status})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/agent/engine', methods=['POST'])
+def agent_engine_switch():
+    """一键无缝切换 LLM 引擎。body: {"engine": "ollama" | "vllm"}"""
+    if not AGENT_AVAILABLE:
+        return jsonify({'success': False, 'error': 'Agent module not loaded'}), 500
+    try:
+        data = request.json or {}
+        target = (data.get('engine') or '').strip().lower()
+        if target not in ('ollama', 'vllm'):
+            return jsonify({'success': False,
+                            'error': "engine 必须为 'ollama' 或 'vllm'"}), 400
+        ok, message = agent_manager.switch_engine(target)
+        return jsonify({'success': ok, 'message': message,
+                        'engine': agent_manager.engine_status()})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/agent/query', methods=['POST'])
