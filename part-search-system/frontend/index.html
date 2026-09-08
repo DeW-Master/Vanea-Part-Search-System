@@ -2796,6 +2796,7 @@
               <div class="delta-toggle-switch">
                 <button class="delta-toggle-btn" id="deltaBtn1" onclick="switchDelta(1)" data-i18n="delta1Btn">Delta1</button>
                 <button class="delta-toggle-btn active" id="deltaBtn2" onclick="switchDelta(2)" data-i18n="delta2Btn">Delta2</button>
+                <button class="delta-toggle-btn" id="deltaBtn3" onclick="switchDelta(3)" data-i18n="delta3Btn">Delta3</button>
               </div>
             </div>
           </div>
@@ -2921,11 +2922,14 @@
           <select id="deltaFromStage">
             <option value="pre-TO" data-i18n="stagePreTo">pre-TO</option>
             <option value="TO1" data-i18n="stageTo1">TO1</option>
+            <option value="TO2" data-i18n="stageTo2">TO2</option>
+            <option value="TO3" data-i18n="stageTo3">TO3</option>
           </select>
           <span>→</span>
           <select id="deltaToStage">
             <option value="TO1" data-i18n="stageTo1">TO1</option>
             <option value="TO2" data-i18n="stageTo2">TO2</option>
+            <option value="TO3" data-i18n="stageTo3">TO3</option>
           </select>
           <input type="text" id="deltaPnSearch" data-i18n-placeholder="deltaPnPlaceholder" placeholder="按零件号搜索...">
           <button class="btn-primary" onclick="loadDelta()" data-i18n="deltaQuery">查询</button>
@@ -3205,6 +3209,7 @@
         deltaToggleLabel: 'Delta',
         delta1Btn: 'Delta1',
         delta2Btn: 'Delta2',
+        delta3Btn: 'Delta3',
         deltaPathViewTitle: 'EC / ZEUS / SOMA 路径分布',
         deltaEcStatusTitle: 'EC 状态分布',
         deltaZeusStatusTitle: 'ZEUS 状态分布',
@@ -3213,6 +3218,7 @@
         treePreTo: 'pre-TO',
         treeTo1: 'TO1',
         treeTo2: 'TO2',
+        treeTo3: 'TO3',
         treePnUnit: ' PN',
         treeDeltaPrefix: 'Delta',
         treeChangeSuffix: ' 变更',
@@ -3228,6 +3234,7 @@
         // KPI sub text
         kpiDelta1Sub: 'pre-TO → TO1',
         kpiDelta2Sub: 'TO1 → TO2',
+        kpiDelta3Sub: 'TO2 → TO3',
         // Pie chart labels
         pieNoData: '无数据',
         // Bar/Line chart labels
@@ -3242,6 +3249,7 @@
         stagePreTo: 'pre-TO',
         stageTo1: 'TO1',
         stageTo2: 'TO2',
+        stageTo3: 'TO3',
         // Baulos
         noBaulosData: '暂无Baulos阶段数据',
       },
@@ -3422,6 +3430,7 @@
         deltaToggleLabel: 'Delta',
         delta1Btn: 'Delta1',
         delta2Btn: 'Delta2',
+        delta3Btn: 'Delta3',
         deltaPathViewTitle: 'EC / ZEUS / SOMA Path View',
         deltaEcStatusTitle: 'EC Status Distribution',
         deltaZeusStatusTitle: 'ZEUS Status Distribution',
@@ -3430,6 +3439,7 @@
         treePreTo: 'pre-TO',
         treeTo1: 'TO1',
         treeTo2: 'TO2',
+        treeTo3: 'TO3',
         treePnUnit: ' PN',
         treeDeltaPrefix: 'Delta',
         treeChangeSuffix: ' changes',
@@ -3445,6 +3455,7 @@
         // KPI sub text
         kpiDelta1Sub: 'pre-TO → TO1',
         kpiDelta2Sub: 'TO1 → TO2',
+        kpiDelta3Sub: 'TO2 → TO3',
         // Pie chart labels
         pieNoData: 'No data',
         // Bar/Line chart labels
@@ -3459,6 +3470,7 @@
         stagePreTo: 'pre-TO',
         stageTo1: 'TO1',
         stageTo2: 'TO2',
+        stageTo3: 'TO3',
         // Baulos
         noBaulosData: 'No Baulos stage data',
       },
@@ -3639,6 +3651,7 @@
         deltaToggleLabel: 'Delta',
         delta1Btn: 'Delta1',
         delta2Btn: 'Delta2',
+        delta3Btn: 'Delta3',
         deltaPathViewTitle: 'EC / ZEUS / SOMA Pfadansicht',
         deltaEcStatusTitle: 'EC-Statusverteilung',
         deltaZeusStatusTitle: 'ZEUS-Statusverteilung',
@@ -3647,6 +3660,7 @@
         treePreTo: 'pre-TO',
         treeTo1: 'TO1',
         treeTo2: 'TO2',
+        treeTo3: 'TO3',
         treePnUnit: ' PN',
         treeDeltaPrefix: 'Delta',
         treeChangeSuffix: ' Änderungen',
@@ -3662,6 +3676,7 @@
         // KPI sub text
         kpiDelta1Sub: 'pre-TO → TO1',
         kpiDelta2Sub: 'TO1 → TO2',
+        kpiDelta3Sub: 'TO2 → TO3',
         // Pie chart labels
         pieNoData: 'Keine Daten',
         // Bar/Line chart labels
@@ -3676,6 +3691,7 @@
         stagePreTo: 'pre-TO',
         stageTo1: 'TO1',
         stageTo2: 'TO2',
+        stageTo3: 'TO3',
         // Baulos
         noBaulosData: 'Keine Baulos-Stadiendaten',
       }
@@ -3846,6 +3862,12 @@
           { value: 25, name: 'Cancelled', itemStyle: { color: '#64748b' } },
           { value: 28, name: 'BE', itemStyle: { color: '#8b5cf6' } }
         ]
+      },
+      delta3: {
+        // Delta3 = TO2 → TO3, no data until TO3 BOM is uploaded
+        kpi: { newPn: null, zgs: null, ec: null, kem: null, soma: null },
+        ecPie: [],
+        zeusPie: []
       }
     };
 
@@ -3893,8 +3915,13 @@
 
     // Helper: get KPI data for a delta
     function _getKpiData(deltaNum) {
+      var noData = { newPn: null, zgs: null, ec: null, kem: null, soma: null };
       if (_deltaApiData) {
-        var src = _deltaApiData['delta' + deltaNum].kpi;
+        var d = _deltaApiData['delta' + deltaNum];
+        if (!d || d.available === false || !d.kpi) {
+          return noData;
+        }
+        var src = d.kpi;
         return {
           newPn: src.new_pn,
           zgs: src.zgs_changed,
@@ -3903,12 +3930,15 @@
           soma: src.soma_ja
         };
       }
-      return _deltaMockData['delta' + deltaNum].kpi;
+      var mock = _deltaMockData['delta' + deltaNum];
+      return mock ? mock.kpi : noData;
     }
 
     // Helper: get stage ratio data for a delta (used for pie chart filtering)
     function _getStageRatioData(deltaNum) {
-      var stageKey = deltaNum === 1 ? 'TO1' : 'TO2';
+      // deltaN 对比的是第 N 个相邻区间, 饼图/漏斗取后一阶段
+      var stageKeyMap = { 1: 'TO1', 2: 'TO2', 3: 'TO3' };
+      var stageKey = stageKeyMap[deltaNum] || 'TO2';
       var stages = _deltaApiData ? _deltaApiData.stages : null;
       if (stages && stages[stageKey]) {
         return {
@@ -3917,19 +3947,21 @@
           somaJa: stages[stageKey].soma_ja || 0
         };
       }
-      // Fallback to mock defaults
-      return {
-        ecPn: deltaNum === 1 ? 1980 : 2022,
-        favPn: deltaNum === 1 ? 694 : 699,
-        somaJa: deltaNum === 1 ? 310 : 295
+      // Fallback to mock defaults (delta3 无 mock, 返回 0)
+      var mockFallback = {
+        1: { ecPn: 1980, favPn: 694, somaJa: 310 },
+        2: { ecPn: 2022, favPn: 699, somaJa: 295 },
+        3: { ecPn: 0, favPn: 0, somaJa: 0 }
       };
+      return mockFallback[deltaNum] || mockFallback[2];
     }
 
     // Helper: get EC pie data for a delta (with colors applied, filtered by drill-down level)
     function _getEcPieData(deltaNum) {
       var src;
-      if (_deltaApiData) {
-        src = _deltaApiData['delta' + deltaNum].ec_pie.map(function(item) {
+      var apiDelta = _deltaApiData ? _deltaApiData['delta' + deltaNum] : null;
+      if (apiDelta && apiDelta.ec_pie) {
+        src = apiDelta.ec_pie.map(function(item) {
           return {
             name: item.name,
             value: item.value,
@@ -3937,7 +3969,8 @@
           };
         });
       } else {
-        src = _deltaMockData['delta' + deltaNum].ecPie;
+        var mock = _deltaMockData['delta' + deltaNum];
+        src = mock ? mock.ecPie : [];
       }
 
       // Apply drill-down filter
@@ -3997,8 +4030,9 @@
     // Helper: get ZEUS pie data for a delta (with colors applied, filtered by drill-down level)
     function _getZeusPieData(deltaNum) {
       var src;
-      if (_deltaApiData) {
-        src = _deltaApiData['delta' + deltaNum].fav_pie.map(function(item) {
+      var apiDelta = _deltaApiData ? _deltaApiData['delta' + deltaNum] : null;
+      if (apiDelta && apiDelta.fav_pie) {
+        src = apiDelta.fav_pie.map(function(item) {
           return {
             name: item.name,
             value: item.value,
@@ -4006,7 +4040,8 @@
           };
         });
       } else {
-        src = _deltaMockData['delta' + deltaNum].zeusPie;
+        var mock = _deltaMockData['delta' + deltaNum];
+        src = mock ? mock.zeusPie : [];
       }
 
       // Apply drill-down filter
@@ -4071,40 +4106,42 @@
     function _getTreeStageData() {
       var stages = _deltaApiData ? _deltaApiData.stages : null;
       var data = {
-        preTo: { total: 5471, pn: 5471 },
+        preTo: { total: 5471, pn: 5471, ecPn: 0, favPn: 0, somaJa: 0 },
         to1: { total: 10433, pn: 2251, ecPn: 1980, favPn: 694, somaJa: 310 },
-        to2: { total: 10121, pn: 2270, ecPn: 2022, favPn: 699, somaJa: 295 }
+        to2: { total: 10121, pn: 2270, ecPn: 2022, favPn: 699, somaJa: 295 },
+        to3: { total: 0, pn: 0, ecPn: 0, favPn: 0, somaJa: 0 }
       };
 
+      // 阶段键名 -> data 属性名（新增阶段只需在这里加一行）
+      var stageMap = [
+        ['pre-TO', 'preTo'], ['TO1', 'to1'], ['TO2', 'to2'], ['TO3', 'to3']
+      ];
       if (stages) {
-        data.preTo.total = stages['pre-TO'].total_records;
-        data.preTo.pn = stages['pre-TO'].unique_pn;
-        data.to1.total = stages['TO1'].total_records;
-        data.to1.pn = stages['TO1'].unique_pn;
-        data.to1.ecPn = stages['TO1'].ec_pn;
-        data.to1.favPn = stages['TO1'].fav_pn;
-        data.to1.somaJa = stages['TO1'].soma_ja;
-        data.to2.total = stages['TO2'].total_records;
-        data.to2.pn = stages['TO2'].unique_pn;
-        data.to2.ecPn = stages['TO2'].ec_pn;
-        data.to2.favPn = stages['TO2'].fav_pn;
-        data.to2.somaJa = stages['TO2'].soma_ja;
+        stageMap.forEach(function(pair) {
+          var s = stages[pair[0]];
+          if (!s) return;
+          data[pair[1]].total = s.total_records || 0;
+          data[pair[1]].pn = s.unique_pn || 0;
+          data[pair[1]].ecPn = s.ec_pn || 0;
+          data[pair[1]].favPn = s.fav_pn || 0;
+          data[pair[1]].somaJa = s.soma_ja || 0;
+        });
       }
 
       // Compute Delta counts (total changed PN per delta)
-      // Delta1 = pre-TO -> TO1
-      // Delta2 = TO1 -> TO2
+      // Delta1 = pre-TO -> TO1, Delta2 = TO1 -> TO2, Delta3 = TO2 -> TO3
       // Use kpi data if available: new_pn + zgs_changed + discontinued_pn
-      var delta1Count = data.to1.pn;
-      var delta2Count = data.to2.pn;
-      if (_deltaApiData) {
-        var d1kpi = _deltaApiData.delta1 ? _deltaApiData.delta1.kpi : null;
-        var d2kpi = _deltaApiData.delta2 ? _deltaApiData.delta2.kpi : null;
-        if (d1kpi) delta1Count = (d1kpi.new_pn || 0) + (d1kpi.zgs_changed || 0) + (d1kpi.discontinued_pn || 0);
-        if (d2kpi) delta2Count = (d2kpi.new_pn || 0) + (d2kpi.zgs_changed || 0) + (d2kpi.discontinued_pn || 0);
+      var stageProps = ['preTo', 'to1', 'to2', 'to3'];
+      for (var i = 1; i < stageProps.length; i++) {
+        var n = i;
+        var fallback = data[stageProps[i]].pn;
+        var count = fallback;
+        if (_deltaApiData && _deltaApiData['delta' + n] && _deltaApiData['delta' + n].kpi) {
+          var kpi = _deltaApiData['delta' + n].kpi;
+          count = (kpi.new_pn || 0) + (kpi.zgs_changed || 0) + (kpi.discontinued_pn || 0);
+        }
+        data['delta' + n + 'Count'] = count || fallback;
       }
-      data.delta1Count = delta1Count || data.to1.pn;
-      data.delta2Count = delta2Count || data.to2.pn;
 
       return data;
     }
@@ -4131,48 +4168,27 @@
       // Clear existing content
       container.innerHTML = '';
 
-      // Create SVG
+      // 阶段定义（新增阶段只需在此追加一项，x 等距 190）
+      var stageDefs = [
+        { prop: 'preTo', label: t('treePreTo'), x: 110 },
+        { prop: 'to1',   label: t('treeTo1'),   x: 300 },
+        { prop: 'to2',   label: t('treeTo2'),   x: 490 },
+        { prop: 'to3',   label: t('treeTo3'),   x: 680 }
+      ];
+      var deltaCount = stageDefs.length - 1;
+
+      // Create SVG（宽度随阶段数扩展）
       var svg = _svgEl('svg', {
-        viewBox: '0 0 600 480',
+        viewBox: '0 0 ' + (stageDefs[stageDefs.length - 1].x + 100) + ' 480',
         preserveAspectRatio: 'xMidYMid meet'
       });
 
-      // --- Layout coordinates (based on 600x480 viewBox) ---
-      // Top stage row y
-      var yStage = 30;
-      // Delta nodes y
-      var yDelta = 110;
-      // EC branch y
-      var yEc = 195;
-      // ZEUS branch y
-      var yZeus = 290;
-      // SOMA y
-      var ySoma = 395;
-
-      // X positions for top stages
-      var xPreTo = 110;
-      var xTo1 = 300;
-      var xTo2 = 490;
-
-      // X positions for delta nodes
-      var xDelta1 = 200;
-      var xDelta2 = 400;
-
-      // X positions for EC split (per delta)
-      var xDelta1NoEc = 130;
-      var xDelta1Ec = 270;
-      var xDelta2NoEc = 330;
-      var xDelta2Ec = 470;
-
-      // X positions for ZEUS split
-      var xDelta1EcNoZeus = 210;
-      var xDelta1EcZeus = 330;
-      var xDelta2EcNoZeus = 410;
-      var xDelta2EcZeus = 530;
-
-      // X positions for SOMA
-      var xDelta1Soma = 330;
-      var xDelta2Soma = 530;
+      // --- Layout coordinates ---
+      var yStage = 30;   // Top stage row y
+      var yDelta = 110;  // Delta nodes y
+      var yEc = 195;     // EC branch y
+      var yZeus = 290;   // ZEUS branch y
+      var ySoma = 395;   // SOMA y
 
       // Node dimensions
       var stageW = 120, stageH = 36;
@@ -4183,112 +4199,56 @@
       // --- Draw connector lines (bottom layer) ---
       var linesGroup = _svgEl('g', { class: 'tree-lines' });
 
-      // Funnel lines: pre-TO -> Delta1, TO1 -> Delta1, TO1 -> Delta2, TO2 -> Delta2
-      var linePreTo_D1 = _svgEl('path', {
-        d: 'M' + xPreTo + ',' + (yStage + stageH/2) + ' Q' + ((xPreTo+xDelta1)/2) + ',' + (yStage+stageH/2 + 30) + ' ' + xDelta1 + ',' + (yDelta - deltaH/2),
-        class: 'tree-line',
-        'data-side': 'delta1',
-        'data-type': 'funnel'
-      });
-      var lineTo1_D1 = _svgEl('path', {
-        d: 'M' + xTo1 + ',' + (yStage + stageH/2) + ' Q' + ((xTo1+xDelta1)/2) + ',' + (yStage+stageH/2 + 30) + ' ' + xDelta1 + ',' + (yDelta - deltaH/2),
-        class: 'tree-line',
-        'data-side': 'delta1',
-        'data-type': 'funnel'
-      });
-      var lineTo1_D2 = _svgEl('path', {
-        d: 'M' + xTo1 + ',' + (yStage + stageH/2) + ' Q' + ((xTo1+xDelta2)/2) + ',' + (yStage+stageH/2 + 30) + ' ' + xDelta2 + ',' + (yDelta - deltaH/2),
-        class: 'tree-line',
-        'data-side': 'delta2',
-        'data-type': 'funnel'
-      });
-      var lineTo2_D2 = _svgEl('path', {
-        d: 'M' + xTo2 + ',' + (yStage + stageH/2) + ' Q' + ((xTo2+xDelta2)/2) + ',' + (yStage+stageH/2 + 30) + ' ' + xDelta2 + ',' + (yDelta - deltaH/2),
-        class: 'tree-line',
-        'data-side': 'delta2',
-        'data-type': 'funnel'
-      });
+      // 每个 Delta（i 从 1 开始）连接前后两个阶段节点
+      for (var di = 1; di <= deltaCount; di++) {
+        var side = 'delta' + di;
+        var xFrom = stageDefs[di - 1].x;
+        var xTo = stageDefs[di].x;
+        var xDelta = (xFrom + xTo) / 2;
 
-      linesGroup.appendChild(linePreTo_D1);
-      linesGroup.appendChild(lineTo1_D1);
-      linesGroup.appendChild(lineTo1_D2);
-      linesGroup.appendChild(lineTo2_D2);
+        // 分支节点 x（相对 delta 节点偏移，保持与原布局一致）
+        var xNoEc = xDelta - 70;
+        var xEc = xDelta + 70;
+        var xNoZeus = xEc - 60;
+        var xZeus = xEc + 60;
+        var xSoma = xZeus;
 
-      // Delta -> EC / no EC lines
-      // Delta1 -> no EC
-      linesGroup.appendChild(_svgEl('path', {
-        d: 'M' + xDelta1 + ',' + (yDelta + deltaH/2) + ' Q' + ((xDelta1+xDelta1NoEc)/2) + ',' + (yEc - 20) + ' ' + xDelta1NoEc + ',' + (yEc - branchH/2),
-        class: 'tree-line',
-        'data-side': 'delta1',
-        'data-type': 'noec'
-      }));
-      // Delta1 -> EC
-      linesGroup.appendChild(_svgEl('path', {
-        d: 'M' + xDelta1 + ',' + (yDelta + deltaH/2) + ' Q' + ((xDelta1+xDelta1Ec)/2) + ',' + (yEc - 20) + ' ' + xDelta1Ec + ',' + (yEc - branchH/2),
-        class: 'tree-line',
-        'data-side': 'delta1',
-        'data-type': 'ec'
-      }));
-      // Delta2 -> no EC
-      linesGroup.appendChild(_svgEl('path', {
-        d: 'M' + xDelta2 + ',' + (yDelta + deltaH/2) + ' Q' + ((xDelta2+xDelta2NoEc)/2) + ',' + (yEc - 20) + ' ' + xDelta2NoEc + ',' + (yEc - branchH/2),
-        class: 'tree-line',
-        'data-side': 'delta2',
-        'data-type': 'noec'
-      }));
-      // Delta2 -> EC
-      linesGroup.appendChild(_svgEl('path', {
-        d: 'M' + xDelta2 + ',' + (yDelta + deltaH/2) + ' Q' + ((xDelta2+xDelta2Ec)/2) + ',' + (yEc - 20) + ' ' + xDelta2Ec + ',' + (yEc - branchH/2),
-        class: 'tree-line',
-        'data-side': 'delta2',
-        'data-type': 'ec'
-      }));
+        // 漏斗线：前阶段 -> Delta、后阶段 -> Delta
+        [xFrom, xTo].forEach(function(xStage) {
+          linesGroup.appendChild(_svgEl('path', {
+            d: 'M' + xStage + ',' + (yStage + stageH/2) + ' Q' + ((xStage+xDelta)/2) + ',' + (yStage+stageH/2 + 30) + ' ' + xDelta + ',' + (yDelta - deltaH/2),
+            class: 'tree-line',
+            'data-side': side,
+            'data-type': 'funnel'
+          }));
+        });
 
-      // EC -> ZEUS / no ZEUS lines
-      // Delta1 EC -> no ZEUS
-      linesGroup.appendChild(_svgEl('path', {
-        d: 'M' + xDelta1Ec + ',' + (yEc + branchH/2) + ' Q' + ((xDelta1Ec+xDelta1EcNoZeus)/2) + ',' + (yZeus - 20) + ' ' + xDelta1EcNoZeus + ',' + (yZeus - branchH/2),
-        class: 'tree-line',
-        'data-side': 'delta1',
-        'data-type': 'ec-nozeus'
-      }));
-      // Delta1 EC -> ZEUS
-      linesGroup.appendChild(_svgEl('path', {
-        d: 'M' + xDelta1Ec + ',' + (yEc + branchH/2) + ' Q' + ((xDelta1Ec+xDelta1EcZeus)/2) + ',' + (yZeus - 20) + ' ' + xDelta1EcZeus + ',' + (yZeus - branchH/2),
-        class: 'tree-line',
-        'data-side': 'delta1',
-        'data-type': 'ec-zeus'
-      }));
-      // Delta2 EC -> no ZEUS
-      linesGroup.appendChild(_svgEl('path', {
-        d: 'M' + xDelta2Ec + ',' + (yEc + branchH/2) + ' Q' + ((xDelta2Ec+xDelta2EcNoZeus)/2) + ',' + (yZeus - 20) + ' ' + xDelta2EcNoZeus + ',' + (yZeus - branchH/2),
-        class: 'tree-line',
-        'data-side': 'delta2',
-        'data-type': 'ec-nozeus'
-      }));
-      // Delta2 EC -> ZEUS
-      linesGroup.appendChild(_svgEl('path', {
-        d: 'M' + xDelta2Ec + ',' + (yEc + branchH/2) + ' Q' + ((xDelta2Ec+xDelta2EcZeus)/2) + ',' + (yZeus - 20) + ' ' + xDelta2EcZeus + ',' + (yZeus - branchH/2),
-        class: 'tree-line',
-        'data-side': 'delta2',
-        'data-type': 'ec-zeus'
-      }));
+        // Delta -> EC / no EC
+        linesGroup.appendChild(_svgEl('path', {
+          d: 'M' + xDelta + ',' + (yDelta + deltaH/2) + ' Q' + ((xDelta+xNoEc)/2) + ',' + (yEc - 20) + ' ' + xNoEc + ',' + (yEc - branchH/2),
+          class: 'tree-line', 'data-side': side, 'data-type': 'noec'
+        }));
+        linesGroup.appendChild(_svgEl('path', {
+          d: 'M' + xDelta + ',' + (yDelta + deltaH/2) + ' Q' + ((xDelta+xEc)/2) + ',' + (yEc - 20) + ' ' + xEc + ',' + (yEc - branchH/2),
+          class: 'tree-line', 'data-side': side, 'data-type': 'ec'
+        }));
 
-      // ZEUS -> SOMA lines
-      // Delta1 ZEUS -> SOMA
-      linesGroup.appendChild(_svgEl('path', {
-        d: 'M' + xDelta1EcZeus + ',' + (yZeus + branchH/2) + ' L' + xDelta1Soma + ',' + (ySoma - somaH/2),
-        class: 'tree-line',
-        'data-side': 'delta1',
-        'data-type': 'zeus-soma'
-      }));
-      // Delta2 ZEUS -> SOMA
-      linesGroup.appendChild(_svgEl('path', {
-        d: 'M' + xDelta2EcZeus + ',' + (yZeus + branchH/2) + ' L' + xDelta2Soma + ',' + (ySoma - somaH/2),
-        class: 'tree-line',
-        'data-side': 'delta2',
-        'data-type': 'zeus-soma'
-      }));
+        // EC -> ZEUS / no ZEUS
+        linesGroup.appendChild(_svgEl('path', {
+          d: 'M' + xEc + ',' + (yEc + branchH/2) + ' Q' + ((xEc+xNoZeus)/2) + ',' + (yZeus - 20) + ' ' + xNoZeus + ',' + (yZeus - branchH/2),
+          class: 'tree-line', 'data-side': side, 'data-type': 'ec-nozeus'
+        }));
+        linesGroup.appendChild(_svgEl('path', {
+          d: 'M' + xEc + ',' + (yEc + branchH/2) + ' Q' + ((xEc+xZeus)/2) + ',' + (yZeus - 20) + ' ' + xZeus + ',' + (yZeus - branchH/2),
+          class: 'tree-line', 'data-side': side, 'data-type': 'ec-zeus'
+        }));
+
+        // ZEUS -> SOMA
+        linesGroup.appendChild(_svgEl('path', {
+          d: 'M' + xZeus + ',' + (yZeus + branchH/2) + ' L' + xSoma + ',' + (ySoma - somaH/2),
+          class: 'tree-line', 'data-side': side, 'data-type': 'zeus-soma'
+        }));
+      }
 
       svg.appendChild(linesGroup);
 
@@ -4305,9 +4265,9 @@
         return g;
       }
 
-      svg.appendChild(createStageNode(xPreTo, yStage, t('treePreTo'), data.preTo.pn.toLocaleString() + t('treePnUnit')));
-      svg.appendChild(createStageNode(xTo1, yStage, t('treeTo1'), data.to1.pn.toLocaleString() + t('treePnUnit')));
-      svg.appendChild(createStageNode(xTo2, yStage, t('treeTo2'), data.to2.pn.toLocaleString() + t('treePnUnit')));
+      stageDefs.forEach(function(sd) {
+        svg.appendChild(createStageNode(sd.x, yStage, sd.label, (data[sd.prop].pn || 0).toLocaleString() + t('treePnUnit')));
+      });
 
       // --- Draw Delta nodes ---
       function createDeltaNode(x, y, deltaNum, count) {
@@ -4339,8 +4299,10 @@
         return g;
       }
 
-      svg.appendChild(createDeltaNode(xDelta1, yDelta, 1, data.delta1Count));
-      svg.appendChild(createDeltaNode(xDelta2, yDelta, 2, data.delta2Count));
+      // 各 Delta 漏斗节点（x = 前后阶段中点）
+      for (var dn = 1; dn <= deltaCount; dn++) {
+        svg.appendChild(createDeltaNode((stageDefs[dn - 1].x + stageDefs[dn].x) / 2, yDelta, dn, data['delta' + dn + 'Count']));
+      }
 
       // --- Draw EC / no EC branch nodes ---
       function createBranchNode(x, y, side, type, label, count) {
@@ -4377,24 +4339,24 @@
         return g;
       }
 
-      // Delta1 side
-      var d1NoEc = (data.delta1Count || data.to1.total) - data.to1.ecPn;
-      svg.appendChild(createBranchNode(xDelta1NoEc, yEc, 1, 'noec', t('treeNoEc'), d1NoEc));
-      svg.appendChild(createBranchNode(xDelta1Ec, yEc, 1, 'ec', t('treeHasEc'), data.to1.ecPn));
+      // 各 Delta 侧的 EC / no-EC / ZEUS / no-ZEUS / SOMA 分支
+      for (var bn = 1; bn <= deltaCount; bn++) {
+        var sdTo = stageDefs[bn];
+        var st = data[sdTo.prop];
+        var xD = (stageDefs[bn - 1].x + sdTo.x) / 2;
+        var xNoEcB = xD - 70;
+        var xEcB = xD + 70;
+        var xNoZeusB = xEcB - 60;
+        var xZeusB = xEcB + 60;
 
-      // Delta2 side
-      var d2NoEc = (data.delta2Count || data.to2.total) - data.to2.ecPn;
-      svg.appendChild(createBranchNode(xDelta2NoEc, yEc, 2, 'noec', t('treeNoEc'), d2NoEc));
-      svg.appendChild(createBranchNode(xDelta2Ec, yEc, 2, 'ec', t('treeHasEc'), data.to2.ecPn));
+        var dNoEc = Math.max(0, (data['delta' + bn + 'Count'] || st.total) - st.ecPn);
+        svg.appendChild(createBranchNode(xNoEcB, yEc, bn, 'noec', t('treeNoEc'), dNoEc));
+        svg.appendChild(createBranchNode(xEcB, yEc, bn, 'ec', t('treeHasEc'), st.ecPn));
 
-      // --- Draw ZEUS / no ZEUS branch nodes ---
-      var d1NoZeus = data.to1.ecPn - data.to1.favPn;
-      svg.appendChild(createBranchNode(xDelta1EcNoZeus, yZeus, 1, 'nozeus', t('treeNoZeus'), d1NoZeus));
-      svg.appendChild(createBranchNode(xDelta1EcZeus, yZeus, 1, 'zeus', t('treeHasZeus'), data.to1.favPn));
-
-      var d2NoZeus = data.to2.ecPn - data.to2.favPn;
-      svg.appendChild(createBranchNode(xDelta2EcNoZeus, yZeus, 2, 'nozeus', t('treeNoZeus'), d2NoZeus));
-      svg.appendChild(createBranchNode(xDelta2EcZeus, yZeus, 2, 'zeus', t('treeHasZeus'), data.to2.favPn));
+        var dNoZeus = Math.max(0, st.ecPn - st.favPn);
+        svg.appendChild(createBranchNode(xNoZeusB, yZeus, bn, 'nozeus', t('treeNoZeus'), dNoZeus));
+        svg.appendChild(createBranchNode(xZeusB, yZeus, bn, 'zeus', t('treeHasZeus'), st.favPn));
+      }
 
       // --- Draw SOMA nodes ---
       function createSomaNode(x, y, side, count) {
@@ -4431,18 +4393,25 @@
         return g;
       }
 
-      svg.appendChild(createSomaNode(xDelta1Soma, ySoma, 1, data.to1.somaJa));
-      svg.appendChild(createSomaNode(xDelta2Soma, ySoma, 2, data.to2.somaJa));
+      for (var sn = 1; sn <= deltaCount; sn++) {
+        var sdSoma = stageDefs[sn];
+        var xSomaB = ((stageDefs[sn - 1].x + sdSoma.x) / 2) + 70 + 60;
+        svg.appendChild(createSomaNode(xSomaB, ySoma, sn, data[sdSoma.prop].somaJa));
+      }
 
-      // Delta divider label (between the two funnels)
+      // Delta divider label（动态拼接各区间，如 pre-TO→TO1 | TO1→TO2 | TO2→TO3）
+      var dividerParts = [];
+      for (var vn = 1; vn <= deltaCount; vn++) {
+        dividerParts.push(stageDefs[vn - 1].label + '→' + stageDefs[vn].label);
+      }
       var divider = _svgEl('text', {
-        x: 300, y: yDelta + 5,
+        x: stageDefs[stageDefs.length - 1].x / 2 + 55, y: yDelta + 5,
         'text-anchor': 'middle',
         fill: '#374151',
         'font-size': '10px',
         'font-weight': '600'
       });
-      divider.textContent = t('treeDividerText');
+      divider.textContent = dividerParts.join('    |    ');
       svg.appendChild(divider);
 
       container.appendChild(svg);
@@ -4491,7 +4460,6 @@
       if (!container) return;
 
       var activeSide = 'delta' + deltaNum;
-      var otherSide = deltaNum === 1 ? 'delta2' : 'delta1';
 
       // Update lines
       var lines = container.querySelectorAll('.tree-line');
@@ -4730,10 +4698,10 @@
       _deltaFilterSide = null;
 
       // Update toggle buttons
-      var btn1 = document.getElementById('deltaBtn1');
-      var btn2 = document.getElementById('deltaBtn2');
-      if (btn1) btn1.classList.toggle('active', deltaNum === 1);
-      if (btn2) btn2.classList.toggle('active', deltaNum === 2);
+      for (var bi = 1; bi <= 3; bi++) {
+        var btn = document.getElementById('deltaBtn' + bi);
+        if (btn) btn.classList.toggle('active', deltaNum === bi);
+      }
 
       // Update all components
       updateKpiCards(deltaNum);
@@ -4747,7 +4715,7 @@
       var keys = ['newPn', 'zgs', 'ec', 'kem', 'soma'];
       var valueIds = ['kpiNewPn', 'kpiZgs', 'kpiEc', 'kpiKem', 'kpiSoma'];
       var subIds = ['kpiNewPnSub', 'kpiZgsSub', 'kpiEcSub', 'kpiKemSub', 'kpiSomaSub'];
-      var subText = deltaNum === 1 ? t('kpiDelta1Sub') : t('kpiDelta2Sub');
+      var subText = t('kpiDelta' + deltaNum + 'Sub');
 
       keys.forEach(function(key, i) {
         var valEl = document.getElementById(valueIds[i]);
@@ -4877,11 +4845,11 @@
     function renderDeltaBarLine() {
       // This chart does NOT change with Delta switch
       // Get data from API or use default fallback
-      var stages = ['pre-TO', 'TO1', 'TO2'];
+      var stages = ['pre-TO', 'TO1', 'TO2', 'TO3'];
       // Fallback: distinct EC (Bundle Number) / ZEUS (FAV) counts aligned on
       // each stage's PN set (same metric the backend bar_line provides).
-      var ecCounts = [2403, 2600, 2552];
-      var favCounts = [421, 471, 471];
+      var ecCounts = [2403, 2600, 2552, 0];
+      var favCounts = [421, 471, 471, 0];
 
       if (_deltaApiData && _deltaApiData.bar_line) {
         stages = _deltaApiData.bar_line.stages;
@@ -5078,9 +5046,14 @@
       if (!level) level = 'all';
       // Determine stage pair based on the currently active delta
       var deltaNum = (typeof _deltaCurrent !== 'undefined') ? _deltaCurrent : 2;
-      var fromStage, toStage;
-      if (deltaNum === 1) { fromStage = 'pre-TO'; toStage = 'TO1'; }
-      else { fromStage = 'TO1'; toStage = 'TO2'; }
+      // Delta 区间 -> 阶段对：delta1=pre-TO→TO1, delta2=TO1→TO2, delta3=TO2→TO3
+      var deltaPairs = {
+        1: ['pre-TO', 'TO1'],
+        2: ['TO1', 'TO2'],
+        3: ['TO2', 'TO3']
+      };
+      var pair = deltaPairs[deltaNum] || deltaPairs[2];
+      var fromStage = pair[0], toStage = pair[1];
 
       _homeDrillState.level = level;
       _homeDrillState.filter = 'all';
@@ -5097,7 +5070,7 @@
         b.classList.toggle('active', b.getAttribute('data-drill-filter') === 'all');
       });
 
-      var deltaLabel = (deltaNum === 1) ? 'Delta1 (pre-TO → TO1)' : 'Delta2 (TO1 → TO2)';
+      var deltaLabel = 'Delta' + deltaNum + ' (' + fromStage + ' → ' + toStage + ')';
       document.getElementById('homeDrillTitle').textContent =
         _drillLabelForLevel(level) + ' · ' + deltaLabel;
       document.getElementById('homeDrillMeta').innerHTML =

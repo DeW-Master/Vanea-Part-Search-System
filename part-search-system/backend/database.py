@@ -581,6 +581,48 @@ class DatabaseManager:
 
     def __init__(self):
         init_db()
+        self._migrate_trim_part_numbers()
+
+    def _migrate_trim_part_numbers(self):
+        """一次性数据修复：去除存量 parts_data 中零件号的首尾空格。
+
+        历史导入的行存在 part_number 带尾空格（如 'A0004605922  '）以及
+        JSON 内 Part Number 键值带空格的问题，会导致精确搜索/阶段对比漏行。
+        """
+        with db_lock:
+            conn = get_db()
+            try:
+                rows = conn.execute(
+                    "SELECT id, part_number, data FROM parts_data"
+                ).fetchall()
+            except Exception:
+                conn.close()
+                return
+            fixed = 0
+            for r in rows:
+                pn = r['part_number'] or ''
+                new_pn = pn.strip()
+                new_data = None
+                try:
+                    d = json.loads(r['data'] or '{}')
+                    changed = False
+                    if isinstance(d.get('Part Number'), str) and d['Part Number'] != d['Part Number'].strip():
+                        d['Part Number'] = d['Part Number'].strip()
+                        changed = True
+                    if changed:
+                        new_data = json.dumps(d, ensure_ascii=False)
+                except Exception:
+                    pass
+                if new_pn != pn or new_data is not None:
+                    conn.execute(
+                        'UPDATE parts_data SET part_number = ?, data = COALESCE(?, data) WHERE id = ?',
+                        (new_pn, new_data, r['id'])
+                    )
+                    fixed += 1
+            if fixed:
+                conn.commit()
+                print(f"[DB] migration: trimmed part_number whitespace on {fixed} row(s)")
+            conn.close()
 
     # ===== 文件管理 =====
 
@@ -830,6 +872,10 @@ class DatabaseManager:
                         if unified_name is None:
                             continue
                         val = serialize_value(row[ci]) if ci < len(row) else ''
+                        if is_part_number_header(header) or is_part_number_header(unified_name):
+                            # 零件号统一去首尾空格（历史数据中存在 'A0004605922  ' 尾空格，
+                            # 会导致精确搜索/Delta 匹配漏行）
+                            val = val.strip() if isinstance(val, str) else val
                         row_data[unified_name] = val
                         if is_part_number_header(header) or is_part_number_header(unified_name):
                             if not part_number:
@@ -901,6 +947,7 @@ class DatabaseManager:
 
     def search_by_part_number(self, part_number, exact=False):
         """按零件号搜索"""
+        part_number = (part_number or '').strip()
         conn = get_db()
         if exact:
             rows = conn.execute(
@@ -943,6 +990,7 @@ class DatabaseManager:
 
     def search_by_field(self, field_name, value, exact=False):
         """按任意字段搜索（使用JSON查询, 兼容双引擎）"""
+        value = (value or '').strip()
         conn = get_db()
 
         # 字段名经 _json_field 校验, 防止标识符注入
@@ -1025,18 +1073,17 @@ class DatabaseManager:
 
         返回: dict，键为业务字段英文名，值为 {"label": 显示名, "samples": [样例值...]}
         """
-        # 可搜索的核心业务字段（英文标识名 -> 显示名）
+        # 可搜索的核心业务字段（JSON 真实键名 -> 显示名）
         searchable_fields = {
             'part_number': 'Part Number',
-            'BuendelNr': 'EC',
-            'KEM': 'KEM',
-            'FAV_fav': 'FAV',
-            'ZGS DiaP': 'ZGS',
-            'SOMA in ZEUS': 'SOMA',
-            'Baulos_aggr': 'Stage',
-            'bndverantwortlicher': 'Responsible',
-            'status': 'Status',
-            'teilbenennung': 'Part Name',
+            'Bundle Number': 'EC',
+            'KEM Number': 'KEM',
+            'FAV': 'FAV',
+            'ZGS': 'ZGS',
+            'Build Lot Aggregate': 'Stage',
+            'Responsible': 'Responsible',
+            'Name': 'Part Name',
+            'Vehicle Series': 'BR/Series',
         }
         conn = get_db()
         result = {}
@@ -1071,32 +1118,35 @@ class DatabaseManager:
         """返回供 LLM NL2SQL 使用的数据库 schema 文本描述。"""
         conn = get_db()
         try:
-            # 从实际数据中抽样 JSON key 及其样例值
-            sample_row = conn.execute(
-                "SELECT data FROM parts_data WHERE data IS NOT NULL LIMIT 1"
-            ).fetchone()
-            sample_keys = []
-            if sample_row and sample_row['data']:
-                try:
-                    sample_keys = list(json.loads(sample_row['data']).keys())
-                except Exception:
-                    sample_keys = []
+            # 聚合全库 data JSON 中实际出现过的键 (按出现频次排序)，
+            # 避免只抽首行漏掉其他文件的列，也避免向 LLM 虚构不存在的键。
+            key_counts = {}
+            try:
+                rows = conn.execute(
+                    "SELECT j.key AS k, COUNT(*) AS c "
+                    "FROM parts_data, json_each(parts_data.data) j "
+                    "GROUP BY j.key ORDER BY c DESC"
+                ).fetchall()
+                key_counts = {r['k']: r['c'] for r in rows}
+            except Exception:
+                key_counts = {}
 
-            # 常用关键字段的中文含义（辅助 LLM 理解）
+            # 常用关键字段的中文含义（键名必须与数据中真实 JSON 键一致）
             key_hints = {
-                'BuendelNr': 'EC编号/错误号 (EC / Fehler Nr.)',
-                'KEM': 'KEM编号',
-                'FAV_fav': 'FAV编号',
-                'ZGS DiaP': 'ZGS版本号',
-                'SOMA in ZEUS': 'SOMA状态(ja/nein)',
-                'Baulos_aggr': '阶段/批次 (Stage/Baulos)',
-                'bndverantwortlicher': '负责人',
-                'status': '状态',
-                'teilbenennung': '零件名称',
-                'Teilbenennung': '零件名称',
-                'Sachnummer': '零件号（冗余在 part_number 列）',
-                'MG': '主组编号',
-                'BR': '车型系列',
+                'Part Number': '零件号（已冗余到 part_number 列，优先用 part_number 列查询）',
+                'Name': '零件名称 (Part Name / Teilbenennung)',
+                'ZGS': 'ZGS 版本号 (如 5 / 6)',
+                'Build Lot Aggregate': '阶段/批次 (Stage/Baulos)，单元格可能用 " | " 分隔多个值，如 AG1_TO2_Fuz | AG1_TO3_Fuz',
+                'Bundle Number': 'EC 编号/变更包号 (EC / BuendelNr)',
+                'KEM Number': 'KEM 编号',
+                'Vehicle Series': '车型系列 (BR / Baureihe)',
+                'Responsible': '负责人 (BND Verantwortlicher)',
+                'Current Status': '现状 (Ist-Zustand)',
+                'Future Status': '目标状态 (Soll-Zustand)',
+                'Keyword Designation': '关键词/变更主题描述',
+                'Package Aggregate': '投产车型/工厂/日期聚合',
+                'BZA': 'BZA 标识',
+                'Plant': '工厂 (Werk)',
             }
 
             lines = [
@@ -1109,20 +1159,19 @@ class DatabaseManager:
                 "  data        JSON/TEXT  其余业务字段，使用 json_extract 访问",
                 "",
                 "JSON data 字段访问方式: json_extract(data, '$.\"字段名\"')",
-                "示例: json_extract(data, '$.\"BuendelNr\"')",
-                "模糊匹配: CAST(json_extract(data, '$.\"BuendelNr\"') AS TEXT) LIKE '%值%'",
-                "非空判断: json_extract(data, '$.\"BuendelNr\"') IS NOT NULL",
+                "示例: json_extract(data, '$.\"Build Lot Aggregate\"')",
+                "模糊匹配: CAST(json_extract(data, '$.\"Name\"') AS TEXT) LIKE '%PEDAL%'",
+                "非空判断: json_extract(data, '$.\"KEM Number\"') IS NOT NULL",
                 "",
-                "data 中常见的字段:",
+                "data 中实际存在的字段 (键名区分大小写，必须原样引用):",
             ]
-            shown = set()
-            for k in sample_keys[:40]:
+            # 只展示真实出现过的键，并附带含义提示
+            for k in list(key_counts.keys())[:40]:
                 hint = key_hints.get(k, '')
                 lines.append(f"  - {k}" + (f"  -- {hint}" if hint else ''))
-                shown.add(k)
-            # 补充未出现在 sample 但已知的重要字段
-            for k, hint in key_hints.items():
-                if k not in shown:
+            # 兜底：若聚合失败没拿到键，退回提示表
+            if not key_counts:
+                for k, hint in key_hints.items():
                     lines.append(f"  - {k}  -- {hint}")
 
             lines += [
@@ -1183,7 +1232,11 @@ class DatabaseManager:
                     data['_file_id'] = rd.get('file_id')
                     data['_row_number'] = rd.get('row_number')
                     data['_record_id'] = rd.get('id')
-                    data.setdefault('part_number', rd.get('part_number', ''))
+                    # 零件号只保留规范化列 part_number（与 JSON 内 'Part Number' 同义，
+                    # 不再注入重复键，避免下游摘要出现 part_number=X; Part Number=X 的重复）
+                    pn_val = (rd.get('part_number') or '').strip()
+                    data['part_number'] = pn_val
+                    data.pop('Part Number', None)
                     parsed.append(data)
                     if data['_file_id'] is not None:
                         file_ids.add(data['_file_id'])
@@ -1881,7 +1934,7 @@ class DatabaseManager:
 
         for r in rows:
             pn = norm(r['part_number'])
-            if not pn or pn in catalog:
+            if not pn:
                 continue
             try:
                 d = json.loads(r['data'])
@@ -1891,11 +1944,17 @@ class DatabaseManager:
             # ENIGMA 数据独立挂在 Part.enigma_record / enigma_values (用于 KPI 统计 / 参考展示)
             # 阶段对比严格基于真实 data，避免外部数据"脑补"产生假差异
             enr_record = enigma_map.get(pn)
-            catalog.add(Part.from_row(
+            part = Part.from_row(
                 r['id'], r['file_id'], pn, d,
                 stage=stage, enigma_values=enigma_index.get(pn),
                 enigma_record=dict(enr_record) if enr_record else None,
-            ))
+            )
+            existing = catalog.get(pn)
+            if existing is not None:
+                # 同 PN 多行（同阶段 BOM 内重复行 / 多 ZGS）：合并 ZGS 集合，不丢行
+                existing.merge_zgs(part)
+            else:
+                catalog.add(part)
         return catalog
 
     def calculate_delta(self, from_stage="pre-TO", to_stage="TO1",
@@ -2267,31 +2326,46 @@ class DatabaseManager:
         """
         conn = get_db()
 
-        # === 1. 各阶段 StageCatalog (ENIGMA 富化/索引只加载一次, 三阶段复用) ===
+        # === 1. 各阶段 StageCatalog (ENIGMA 富化/索引只加载一次, 各阶段复用) ===
+        from config import DELTA_STAGE_VALUES
         enigma_map = self._load_enigma_enrichment(conn)
         enigma_index = self._load_enigma_value_index(conn)
         catalogs = {
             s: self._build_stage_catalog(conn, s, enigma_map=enigma_map,
                                          enigma_index=enigma_index)
-            for s in ('pre-TO', 'TO1', 'TO2')
+            for s in DELTA_STAGE_VALUES
         }
 
         stage_stats = {s: c.stats() for s, c in catalogs.items()}
+        # 实际已导入 BOM 数据的阶段（决定页面可选阶段/区间）
+        available_stages = [s for s in DELTA_STAGE_VALUES if catalogs[s]]
 
-        # === 2. Delta KPI (PN+ZGS 组合匹配, 集合运算) ===
-        delta1_pairs = catalogs['pre-TO'].delta_pairs(catalogs['TO1'])
-        delta2_pairs = catalogs['TO1'].delta_pairs(catalogs['TO2'])
-        delta1_kpi_full = self._compute_kpi_from_delta_pairs(delta1_pairs)
-        delta2_kpi_full = self._compute_kpi_from_delta_pairs(delta2_pairs)
-        delta1_kpi = {k: v for k, v in delta1_kpi_full.items() if k != 'total_delta'}
-        delta2_kpi = {k: v for k, v in delta2_kpi_full.items() if k != 'total_delta'}
+        # === 2. Delta KPI (PN+ZGS 组合匹配, 集合运算), 相邻阶段两两对比 ===
+        delta_defs = []  # [(key, label, from_stage, to_stage), ...]
+        for i in range(1, len(DELTA_STAGE_VALUES)):
+            fs, ts = DELTA_STAGE_VALUES[i - 1], DELTA_STAGE_VALUES[i]
+            delta_defs.append((f'delta{i}', f'{fs} → {ts}', fs, ts))
+
+        delta_kpis = {}
+        delta_pies = {}
+        for key, label, fs, ts in delta_defs:
+            pairs = catalogs[fs].delta_pairs(catalogs[ts]) if catalogs[fs] and catalogs[ts] else []
+            kpi_full = self._compute_kpi_from_delta_pairs(pairs)
+            delta_kpis[key] = {
+                'label': label,
+                'from_stage': fs,
+                'to_stage': ts,
+                'available': bool(catalogs[fs] and catalogs[ts]),
+                'kpi': {k: v for k, v in kpi_full.items() if k != 'total_delta'},
+            }
+            # EC/ZEUS 状态分布饼图（取后阶段）
+            delta_pies[key] = {
+                'ec_pie': catalogs[ts].status_distribution('ec_status') if catalogs[ts] else [],
+                'fav_pie': catalogs[ts].status_distribution('fav_status') if catalogs[ts] else [],
+            }
+
+        # 前三个阶段数据齐全即视为有效（向后兼容）
         valid = all(catalogs[s] for s in ('pre-TO', 'TO1', 'TO2'))
-
-        # === 3. EC 状态分布 (饼图) ===
-        ec_pie_to1 = catalogs['TO1'].status_distribution('ec_status')
-        ec_pie_to2 = catalogs['TO2'].status_distribution('ec_status')
-        fav_pie_to1 = catalogs['TO1'].status_distribution('fav_status')
-        fav_pie_to2 = catalogs['TO2'].status_distribution('fav_status')
 
         # === 4. 柱状折线图数据 ===
         # 以 PN 对齐: 每个阶段统计该阶段 BOM 内所有 PN 关联的去重 EC
@@ -2301,10 +2375,12 @@ class DatabaseManager:
         from config import DELTA_BUSINESS_FIELDS
         ec_col = DELTA_BUSINESS_FIELDS['ec']
         fav_col = DELTA_BUSINESS_FIELDS['fav']
-        stages_order = ['pre-TO', 'TO1', 'TO2']
+        stages_order = DELTA_STAGE_VALUES
 
         def _bar_unique_vals(stage, col_name):
             vals = set()
+            if not catalogs.get(stage):
+                return 0
             for pn in catalogs[stage].pns:
                 rec = enigma_map.get(pn)
                 if not rec:
@@ -2322,23 +2398,25 @@ class DatabaseManager:
 
         conn.close()
 
-        return {
+        result = {
             'valid': valid,
             'stages': stage_stats,
-            'delta1': {
-                'label': 'pre-TO → TO1',
-                'kpi': delta1_kpi,
-                'ec_pie': ec_pie_to1,
-                'fav_pie': fav_pie_to1,
-            },
-            'delta2': {
-                'label': 'TO1 → TO2',
-                'kpi': delta2_kpi,
-                'ec_pie': ec_pie_to2,
-                'fav_pie': fav_pie_to2,
-            },
+            'available_stages': available_stages,
             'bar_line': bar_line,
         }
+        # delta1/delta2/delta3...：统一从 delta_kpis/delta_pies 展开，
+        # 保持 delta1/delta2 键名向后兼容，新增阶段自动出现 deltaN
+        for key, label, fs, ts in delta_defs:
+            result[key] = {
+                'label': label,
+                'from_stage': fs,
+                'to_stage': ts,
+                'available': delta_kpis[key]['available'],
+                'kpi': delta_kpis[key]['kpi'],
+                'ec_pie': delta_pies[key]['ec_pie'],
+                'fav_pie': delta_pies[key]['fav_pie'],
+            }
+        return result
 
     def _compute_delta_summary(self, deltas):
         """计算 Delta 统计摘要。"""

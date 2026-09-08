@@ -1080,8 +1080,9 @@ def upload_bom():
             return jsonify({'success': False, 'error': 'No filename'}), 400
 
         # 接收阶段参数
+        from config import DELTA_STAGE_VALUES
         stage = request.form.get('stage', '').strip()
-        valid_stages = ['pre-TO', 'TO1', 'TO2']
+        valid_stages = DELTA_STAGE_VALUES
         if stage not in valid_stages:
             return jsonify({'success': False, 'error': f'Invalid stage. Must be one of: {valid_stages}'}), 400
 
@@ -1728,24 +1729,22 @@ def agent_suggestions():
         templates = {
             'part_number': (
                 '查询零件号 {v} 的信息', 'Query part number {v}', 'Teilenummer {v} abfragen'),
-            'BuendelNr': (
+            'Bundle Number': (
                 '查找EC号为 {v} 的零件', 'Find parts with EC {v}', 'Teile mit EC {v} finden'),
-            'KEM': (
+            'KEM Number': (
                 '查找KEM为 {v} 的零件', 'Find parts with KEM {v}', 'Teile mit KEM {v} finden'),
-            'FAV_fav': (
+            'FAV': (
                 '查找FAV为 {v} 的零件', 'Find parts with FAV {v}', 'Teile mit FAV {v} finden'),
-            'ZGS DiaP': (
+            'ZGS': (
                 '查找ZGS版本为 {v} 的零件', 'Find parts with ZGS {v}', 'Teile mit ZGS {v} finden'),
-            'SOMA in ZEUS': (
-                '查找SOMA为 {v} 的零件', 'Find parts with SOMA {v}', 'Teile mit SOMA {v} finden'),
-            'Baulos_aggr': (
+            'Build Lot Aggregate': (
                 '查找阶段 {v} 的零件', 'Find parts in stage {v}', 'Teile in Stufe {v} finden'),
-            'bndverantwortlicher': (
+            'Responsible': (
                 '查找负责人为 {v} 的零件', 'Find parts responsible by {v}', 'Teile verantwortlich von {v} finden'),
-            'status': (
-                '查找状态为 {v} 的零件', 'Find parts with status {v}', 'Teile mit Status {v} finden'),
-            'teilbenennung': (
+            'Name': (
                 '查找名称包含 {v} 的零件', 'Find parts named like {v}', 'Teile mit Name {v} finden'),
+            'Vehicle Series': (
+                '查找车型系列 {v} 的零件', 'Find parts in vehicle series {v}', 'Teile der Baureihe {v} finden'),
         }
 
         zh, en, de = [], [], []

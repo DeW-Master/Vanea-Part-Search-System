@@ -16,7 +16,7 @@ import threading
 import urllib.request
 import urllib.error
 
-from database import db_manager
+from database import db_manager, get_db
 from config import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_REQUEST_TIMEOUT
 
 # ============ Phase 3: Ollama 负载均衡器 (懒加载，失败回退直连 OLLAMA_URL) ============
@@ -436,8 +436,8 @@ FIELD_SYNONYMS = {
     },
     'ec': {
         'keywords': ['ec', 'ec编号', 'ec号', 'fehler', '错误号', '故障号', 'fehler nr', 'fehler编号', '缺陷号', 'ec number', 'buendelnr', 'bundle number', 'bündelnr', 'bundle nr', 'fehlercode', 'fehlernummer', 'fehler nr.'],
-        'db_fields': ['EC', 'EC Number', 'Fehler Nr.', 'Fehler_Nr', 'BuendelNr'],
-        'description': 'EC编号 (EC / Fehler Nr. / BuendelNr)'
+        'db_fields': ['Bundle Number', 'EC', 'EC Number', 'Fehler Nr.', 'Fehler_Nr', 'BuendelNr'],
+        'description': 'EC编号 (EC / Bundle Number / Fehler Nr. / BuendelNr)'
     },
     'soma': {
         'keywords': ['soma', 'soma in zeus', 'soma状态', 'soma in zeus?', 'soma status'],
@@ -460,9 +460,9 @@ FIELD_SYNONYMS = {
         'description': '车型系列 (Vehicle Series / BR)'
     },
     'part_name': {
-        'keywords': ['teilbenennung', '零件名', '零件名称', 'part name', 'partname', '部件名', '部件名称', '描述', 'teilbezeichnung'],
-        'db_fields': ['Part Name', 'Teilbenennung', 'result.Teilbenennung'],
-        'description': '零件名称 (Part Name / Teilbenennung)'
+        'keywords': ['teilbenennung', '零件名', '零件名称', 'part name', 'partname', '部件名', '部件名称', '描述', 'teilbezeichnung', 'name'],
+        'db_fields': ['Name', 'Part Name', 'Teilbenennung', 'result.Teilbenennung'],
+        'description': '零件名称 (Name / Part Name / Teilbenennung)'
     },
     'status': {
         'keywords': ['status', '状态', 'zustand'],
@@ -697,6 +697,422 @@ OFF_TOPIC_KEYWORDS = [
     '再见', 'bye', '生日', 'birthday', '节日', 'holiday',
 ]
 
+# ---------- 检索结果归并/提炼 ----------
+# 归一化字段名: 原始行中的多种别名 -> 标准键
+_CONSOLIDATED_FIELD_ALIASES = {
+    'part_number': ['part_number', 'Part Number', 'Sachnummer', 'Teilenummer'],
+    'part_name': ['Name', 'teilbenennung', 'Teilbenennung', 'Part Name', 'Teilbezeichnung'],
+    'zgs': ['ZGS DiaP', 'ZGS', 'ZGS_ACM', 'ZGS_KEM'],
+    'ec': ['BuendelNr', 'EC', 'EC Number', 'Fehler Nr.', 'Fehler_Nr', 'Bundle Number'],
+    'fav': ['FAV_fav', 'FAV Number', 'FAV Nr.', 'FAV_number', 'fav_number'],
+    'kem': ['KEM', 'KEM Number', 'KEM_Nummer'],
+    'soma': ['SOMA in ZEUS', 'Soma in ZEUS ?', 'Soma in ZEUS?'],
+    'stage': ['Build Lot Aggregate', 'Baulos_aggr', 'Build Lot', 'Stage'],
+    'status': ['status', 'Status'],
+    'mg': ['MG', 'Main Group'],
+    'br': ['BR', 'Vehicle Series', 'Baureihe'],
+    'responsible': ['bndverantwortlicher', 'Responsible'],
+}
+_CONSOLIDATED_LABELS = {
+    'part_number': 'Part Number', 'part_name': 'Part Name', 'zgs': 'ZGS',
+    'ec': 'EC/Bundle', 'fav': 'FAV', 'kem': 'KEM', 'soma': 'SOMA',
+    'stage': 'Stage/Build Lot', 'status': 'Status', 'mg': 'MG',
+    'br': 'BR/Series', 'responsible': 'Responsible',
+}
+
+
+def _split_multi(value):
+    """把 'AG1_PreTO_Fuz | AG1_TO1_Fuz' / 'a,b' 之类的合并值拆成原子值集合。"""
+    if value is None:
+        return []
+    s = str(value).strip()
+    if not s or s.lower() == 'null':
+        return []
+    atoms = re.split(r'\s*[|,;/]\s*', s)
+    return [a.strip() for a in atoms if a.strip()]
+
+
+def _norm_zgs_value(value):
+    """ZGS 纯数字去前导零 ('005' -> '5')，与 models.part.norm_zgs 保持一致。"""
+    s = str(value).strip()
+    if s.isdigit():
+        return str(int(s))
+    return s
+
+
+def consolidate_rows(rows):
+    """把同一零件号在多个阶段/文件中的多行归并为一条提炼记录。
+
+    返回 list[dict]，每条含标准字段，值为去重后的原子值列表；
+    额外带 _row_count（归并行数）。无零件号的行各自成组。
+    """
+    groups = {}
+    order = []
+    no_pn_idx = 0
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        norm = {}
+        for std_key, aliases in _CONSOLIDATED_FIELD_ALIASES.items():
+            vals = []
+            for alias in aliases:
+                if alias in row and row[alias] not in (None, '', 'null'):
+                    vals.extend(_split_multi(row[alias]))
+            if std_key == 'zgs':
+                vals = [_norm_zgs_value(v) for v in vals]
+            # 去重保序
+            seen = set()
+            uniq = []
+            for v in vals:
+                if v not in seen:
+                    seen.add(v)
+                    uniq.append(v)
+            if uniq:
+                norm[std_key] = uniq
+
+        pn_list = norm.get('part_number') or []
+        pn = pn_list[0].strip() if pn_list else ''
+        if pn:
+            if pn not in groups:
+                groups[pn] = {'_row_count': 0}
+                order.append(('pn', pn))
+            g = groups[pn]
+        else:
+            no_pn_idx += 1
+            key = f'__nopn_{no_pn_idx}'
+            groups[key] = {'_row_count': 0}
+            order.append(('raw', key))
+            g = groups[key]
+        g['_row_count'] += 1
+        for k, vals in norm.items():
+            if k == 'part_number':
+                continue
+            merged = g.setdefault(k, [])
+            seen = set(merged)
+            for v in vals:
+                if v not in seen:
+                    seen.add(v)
+                    merged.append(v)
+
+    result = []
+    for kind, key in order:
+        g = groups[key]
+        item = dict(g)
+        if kind == 'pn':
+            item['part_number'] = [key]
+        result.append(item)
+    # 归并行数多的排前面
+    result.sort(key=lambda it: -it.get('_row_count', 1))
+    return result
+
+
+def format_consolidated_summary(rows, max_groups=10, lang='zh'):
+    """把归并后的记录格式化为供 LLM 使用/直接展示的提炼文本。"""
+    groups = consolidate_rows(rows)
+    if not groups:
+        return ''
+    if lang == 'en':
+        header = f"(consolidated into {len(groups)} part group(s) from {len(rows or [])} row(s))"
+        rows_label = 'rows'
+    elif lang == 'de':
+        header = f"(in {len(groups)} Teilegruppe(n) zusammengefasst aus {len(rows or [])} Zeile(n))"
+        rows_label = 'Zeilen'
+    else:
+        header = f"（{len(rows or [])} 行已按零件号归并为 {len(groups)} 个零件）"
+        rows_label = '行'
+
+    lines = [header]
+    for i, g in enumerate(groups[:max_groups], 1):
+        segs = [f"Part {i}"]
+        for std_key in ('part_number', 'part_name', 'zgs', 'stage', 'ec',
+                        'fav', 'kem', 'soma', 'status', 'mg', 'br', 'responsible'):
+            vals = g.get(std_key)
+            if vals:
+                label = _CONSOLIDATED_LABELS.get(std_key, std_key)
+                joined = ', '.join(str(v) for v in vals[:12])
+                if len(vals) > 12:
+                    joined += f' ...(+{len(vals) - 12})'
+                segs.append(f"{label}: {joined}")
+        segs.append(f"[{g.get('_row_count', 1)} {rows_label}]")
+        lines.append('; '.join(segs))
+    if len(groups) > max_groups:
+        if lang == 'en':
+            lines.append(f"... {len(groups) - max_groups} more part group(s)")
+        elif lang == 'de':
+            lines.append(f"... {len(groups) - max_groups} weitere Teilegruppe(n)")
+        else:
+            lines.append(f"... 另有 {len(groups) - max_groups} 个零件未列出")
+    return '\n'.join(lines)
+
+
+# 逐行维度摘要: SQL 结果列名(归一化) -> 标准字段
+_ROWISE_COLUMN_MATCHERS = {
+    'part_number': ('part number', 'partnumber', 'teilenummer', 'sachnummer'),
+    'part_name': ('part name', 'partname', 'teilbenennung', 'teilbezeichnung', 'name'),
+    'zgs': ('zgs',),
+    'stage': ('build lot', 'buildlot', 'baulos', 'stage', 'phase'),
+    'ec': ('bundle', 'buendel', 'fehler', 'ec number'),
+    'kem': ('kem',),
+    'fav': ('fav',),
+    'br': ('vehicle series', 'baureihe', 'series'),
+    'responsible': ('responsible', 'verantwortlicher'),
+    'status': ('status', 'zustand'),
+}
+_ROWISE_LABELS = {
+    'zh': {'part_number': '零件号', 'part_name': '零件名称', 'zgs': 'ZGS',
+           'stage': '阶段/Build Lot', 'ec': 'EC/Bundle', 'kem': 'KEM', 'fav': 'FAV',
+           'br': '车型系列', 'responsible': '负责人', 'status': '状态'},
+    'en': {'part_number': 'Part Number', 'part_name': 'Part Name', 'zgs': 'ZGS',
+           'stage': 'Stage/Build Lot', 'ec': 'EC/Bundle', 'kem': 'KEM', 'fav': 'FAV',
+           'br': 'Vehicle Series', 'responsible': 'Responsible', 'status': 'Status'},
+    'de': {'part_number': 'Teilenummer', 'part_name': 'Teilbenennung', 'zgs': 'ZGS',
+           'stage': 'Stufe/Baulos', 'ec': 'EC/Buendel', 'kem': 'KEM', 'fav': 'FAV',
+           'br': 'Baureihe', 'responsible': 'Verantwortlicher', 'status': 'Status'},
+}
+
+
+def _norm_col_name(col):
+    return re.sub(r'[\s_.\-]+', ' ', str(col).strip().lower())
+
+
+def _rowwise_std_key(col):
+    n = _norm_col_name(col)
+    for std_key, names in _ROWISE_COLUMN_MATCHERS.items():
+        if n in names or any(nm in n for nm in names):
+            return std_key
+    return None
+
+
+def _load_file_stage_map():
+    """返回 {file_id: stage}，来源 uploaded_files（文件级阶段标签）。"""
+    conn = None
+    try:
+        conn = get_db()
+        rows = conn.execute(
+            "SELECT id, stage FROM uploaded_files "
+            "WHERE stage IS NOT NULL AND stage <> ''"
+        ).fetchall()
+        return {r['id']: r['stage'] for r in rows}
+    except Exception as e:
+        print(f"[Agent] _load_file_stage_map failed: {e}")
+        return {}
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+# Build Lot 单元格值 -> 阶段标签的关键词映射（兜底：文件级 stage 缺失时使用）
+_STAGE_TOKEN_MAP = [
+    ('preto', 'pre-TO'), ('pre_to', 'pre-TO'), ('pre-to', 'pre-TO'),
+    ('to1', 'TO1'), ('to2', 'TO2'), ('to3', 'TO3'),
+    ('pro1', 'TO1'),
+]
+
+
+def _stage_from_buildlot(value):
+    """从 Build Lot 单元格（如 'AG1_TO2_Fuz | AG1_TO3_Fuz'）解析阶段标签集合。"""
+    stages = []
+    for atom in _split_multi(value):
+        low = atom.lower().replace('-', '_').replace(' ', '')
+        for token, label in _STAGE_TOKEN_MAP:
+            if token in low and label not in stages:
+                stages.append(label)
+    return stages
+
+
+def backfill_row_stages(results, columns):
+    """对缺阶段标签的维度查询结果做确定性补全（不依赖 LLM 是否 SELECT file_id）。
+
+    维度类（阶段/ZGS 变化）查询若 LLM 没 JOIN uploaded_files 也没选 file_id，
+    行里会出现 ZGS 有值但 stage 为空（如 TO2 文件 Build Lot 单元格缺失）。
+    这里用零件号/零件名在 parts_data JOIN uploaded_files 反查每条归属文件的
+    阶段：文件级 stage 优先，缺失时从 Build Lot 单元格关键词解析。补全结果
+    直接写回每行的 'stage' / 'file_id' 键，供 format_rowwise_summary 使用。
+    返回补全的行数。
+    """
+    if not results:
+        return 0
+    col_std = {c: _rowwise_std_key(c) for c in (columns or [])}
+    # 结果行里阶段列名（若 LLM 起了别名 stage/build_lot 等）
+    stage_cols = [c for c, k in col_std.items() if k == 'stage']
+    pn_cols = [c for c, k in col_std.items() if k == 'part_number']
+    name_cols = [c for c, k in col_std.items() if k == 'part_name']
+
+    def _row_needs_stage(row):
+        # 已有非空阶段值则无需补
+        for c in stage_cols:
+            if row.get(c) not in (None, '', 'null'):
+                return False
+        if row.get('stage') not in (None, '', 'null'):
+            return False
+        # 需要有 ZGS 或零件名这类维度信息才值得补
+        has_dim = any(
+            row.get(c) not in (None, '', 'null')
+            for c, k in col_std.items() if k in ('zgs', 'part_name')
+        ) or row.get('ZGS') not in (None, '', 'null')
+        return has_dim
+
+    # 收集需要补全的零件号/零件名
+    keys = set()
+    need_idx = []
+    for i, row in enumerate(results):
+        if not isinstance(row, dict) or not _row_needs_stage(row):
+            continue
+        pn = ''
+        for c in pn_cols:
+            pn = str(row.get(c) or '').strip()
+            if pn:
+                break
+        if not pn:
+            pn = str(row.get('part_number') or row.get('Part Number') or '').strip()
+        nm = ''
+        for c in name_cols:
+            nm = str(row.get(c) or '').strip()
+            if nm:
+                break
+        if not nm:
+            nm = str(row.get('Name') or '').strip()
+        if pn:
+            keys.add(('pn', pn))
+        elif nm:
+            keys.add(('nm', nm))
+        else:
+            continue
+        need_idx.append((i, pn, nm))
+
+    if not need_idx:
+        return 0
+
+    # 反查：零件号 -> [(file_id, stage, buildlot)]；零件名同理
+    pn_map = {}
+    nm_map = {}
+    conn = None
+    try:
+        conn = get_db()
+        sql = (
+            "SELECT pd.part_number AS pn, "
+            "json_extract(pd.data,'$.\"Name\"') AS nm, "
+            "json_extract(pd.data,'$.\"Build Lot Aggregate\"') AS bl, "
+            "pd.file_id AS fid, uf.stage AS fstage "
+            "FROM parts_data pd LEFT JOIN uploaded_files uf ON uf.id = pd.file_id "
+            "WHERE uf.status = 'active'"
+        )
+        for r in conn.execute(sql).fetchall():
+            pn = (r['pn'] or '').strip()
+            nm = (r['nm'] or '').strip()
+            bl = r['bl']
+            fstage = (r['fstage'] or '').strip()
+            labels = []
+            if fstage:
+                labels.append(fstage)
+            labels.extend(_stage_from_buildlot(bl))
+            # 去重保序
+            seen = []
+            for lab in labels:
+                if lab and lab not in seen:
+                    seen.append(lab)
+            rec = (r['fid'], seen)
+            if pn:
+                pn_map.setdefault(pn, []).append(rec)
+            if nm:
+                nm_map.setdefault(nm, []).append(rec)
+    except Exception as e:
+        print(f"[Agent] backfill_row_stages query failed: {e}")
+        return 0
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    filled = 0
+    for i, pn, nm in need_idx:
+        recs = pn_map.get(pn) if pn else None
+        if not recs and nm:
+            recs = nm_map.get(nm)
+        if not recs:
+            continue
+        # 汇总该零件出现过的所有阶段标签（多阶段文件会给出多个）
+        labels = []
+        fid_val = None
+        for fid, labs in recs:
+            if fid_val is None:
+                fid_val = fid
+            for lab in labs:
+                if lab not in labels:
+                    labels.append(lab)
+        if not labels:
+            continue
+        stage_str = ' | '.join(labels)
+        row = results[i]
+        # 写入阶段列：优先用已有的 stage 别名列，否则放 'stage'
+        target_col = stage_cols[0] if stage_cols else 'stage'
+        row[target_col] = stage_str
+        if not row.get('file_id') and not row.get('_file_id'):
+            row['file_id'] = fid_val
+        filled += 1
+    return filled
+
+
+def format_rowwise_summary(rows, lang='zh', columns=None):
+    """逐行保留字段对应关系的结果摘要。
+
+    适用于"阶段/ZGS 变化"等不含零件号列的维度查询：按 PN 归并会把每行
+    错拆成独立零件并丢失 阶段->ZGS 的对应关系。这里逐行展示，拆分
+    ' | ' 多阶段单元格、ZGS 去前导零、跳过空值，列名映射为业务标签。
+    若某行阶段为空但能拿到 file_id（如 TO2 文件单元格缺 Build Lot），
+    用 uploaded_files.stage 兜底补全，避免出现无阶段标签的行。
+    """
+    if not rows:
+        return ''
+    # 确定性补全：缺阶段标签的维度行，用零件号/零件名反查文件阶段
+    try:
+        backfill_row_stages(rows, columns or [])
+    except Exception as e:
+        print(f"[Agent] backfill_row_stages skipped: {e}")
+    labels = _ROWISE_LABELS.get(lang, _ROWISE_LABELS['en'])
+    file_stage = None
+    lines = []
+    for i, row in enumerate(rows, 1):
+        if not isinstance(row, dict):
+            continue
+        segs = []
+        # 该行各字段标准键 -> 原子值
+        row_std = {}
+        for col, val in row.items():
+            if val is None or str(val).strip() in ('', 'null'):
+                continue
+            atoms = _split_multi(val)
+            if not atoms:
+                continue
+            std_key = _rowwise_std_key(col)
+            if std_key == 'zgs':
+                atoms = [_norm_zgs_value(a) for a in atoms]
+            row_std[std_key or str(col)] = atoms
+
+        # 阶段缺失兜底：用文件级 stage 标签补全
+        if 'stage' not in row_std and ('zgs' in row_std or 'part_name' in row_std):
+            fid = row.get('file_id') or row.get('_file_id') or row.get('fid')
+            if fid is not None:
+                if file_stage is None:
+                    file_stage = _load_file_stage_map()
+                fb = file_stage.get(fid)
+                if fb:
+                    row_std['stage'] = [str(fb)]
+
+        for key, atoms in row_std.items():
+            if key in ('file_id', '_file_id', 'fid'):
+                continue
+            label = labels.get(key, str(key)) if key in labels else str(key)
+            segs.append(f"{label}: {', '.join(str(a) for a in atoms)}")
+        if segs:
+            lines.append(f"{i}. " + '; '.join(segs))
+    return '\n'.join(lines)
+
 
 class OllamaAgent:
     """Ollama大模型智能体 (Phase 3: 通过 LB 路由 + 自动重试)"""
@@ -824,20 +1240,9 @@ Geben Sie nur JSON zurück."""
                 return "Keine übereinstimmenden Daten gefunden"
             else:
                 return "未找到匹配数据"
-        lang = get_language()
-        if lang == 'en':
-            record_label = "Record"
-        elif lang == 'de':
-            record_label = "Datensatz"
-        else:
-            record_label = "记录"
-        parts = []
-        for i, row in enumerate(search_results[:5]):
-            parts.append(f"\n{record_label} {i+1}:")
-            for k, v in row.items():
-                if not k.startswith('_') and v and v != 'null' and v != '':
-                    parts.append(f"  {k}: {str(v)[:200]}")
-        return '\n'.join(parts)
+        # 同一零件号的多行（多阶段/多文件）归并提炼，避免重复罗列
+        return format_consolidated_summary(search_results, max_groups=10,
+                                           lang=get_language())
 
 
 class RuleBasedAgent:
@@ -851,6 +1256,14 @@ class RuleBasedAgent:
 
         search_field = self._detect_field(query_lower)
         search_value = self._extract_value(user_query, search_field)
+
+        # 高置信度零件号 (A+7~12位数字) 优先按零件号处理，
+        # 避免 "A4493000000 这个零件..." 因问句含 "ZGS" 等关键词被误判为其他字段。
+        pn_match = re.search(r'(?<![A-Za-z0-9])(A\d{7,12})(?![A-Za-z0-9])', user_query)
+        if pn_match:
+            search_field = 'part_number'
+            search_value = pn_match.group(1)
+
         question_type = self._detect_question_type(query_lower)
 
         if not search_field and not search_value:
@@ -974,62 +1387,80 @@ class RuleBasedAgent:
                         f"建议：\n• 请检查输入的编号是否正确\n• 尝试使用模糊搜索\n• 确认该编号已存在于数据库中")
 
         total = len(search_results)
+        # 同一零件号在多阶段/文件中可能有多行，先归并提炼再展示
+        groups = consolidate_rows(search_results)
         parts = []
 
         if question_type == 'summary':
             if lang == 'en':
-                parts.append(f"📊 **Query Summary**\nSearch criteria: {field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\nFound **{total}** matching records")
+                parts.append(f"📊 **Query Summary**\nSearch criteria: {field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\nFound **{total}** matching records, consolidated into **{len(groups)}** part(s)")
             elif lang == 'de':
-                parts.append(f"📊 **Abfragezusammenfassung**\nSuchkriterium: {field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\n**{total}** übereinstimmende Datensätze gefunden")
+                parts.append(f"📊 **Abfragezusammenfassung**\nSuchkriterium: {field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\n**{total}** übereinstimmende Datensätze, zu **{len(groups)}** Teil(en) zusammengefasst")
             else:
-                parts.append(f"📊 **查询汇总**\n搜索条件：{field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\n共找到 **{total}** 条匹配记录")
+                parts.append(f"📊 **查询汇总**\n搜索条件：{field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\n共找到 **{total}** 条匹配记录，按零件号归并为 **{len(groups)}** 个零件")
         elif question_type == 'list':
             if lang == 'en':
-                parts.append(f"📋 **Query Results List**\nSearch criteria: {field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\nFound **{total}** matching records:\n")
+                parts.append(f"📋 **Query Results List**\nSearch criteria: {field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\nFound **{total}** records, consolidated into **{len(groups)}** part(s):\n")
             elif lang == 'de':
-                parts.append(f"📋 **Abfrageergebnis-Liste**\nSuchkriterium: {field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\n**{total}** übereinstimmende Datensätze gefunden:\n")
+                parts.append(f"📋 **Abfrageergebnis-Liste**\nSuchkriterium: {field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\n**{total}** Datensätze, zu **{len(groups)}** Teil(en) zusammengefasst:\n")
             else:
-                parts.append(f"📋 **查询结果列表**\n搜索条件：{field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\n共找到 **{total}** 条匹配记录：\n")
-            for i, row in enumerate(search_results[:10]):
-                key = self._get_key_fields(row)
-                src = row.get('_source_file', '')
-                parts.append(f"{i+1}. {key}" + (f"  [{src}]" if src else ""))
-            if total > 10:
+                parts.append(f"📋 **查询结果列表**\n搜索条件：{field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\n共找到 **{total}** 条记录，按零件号归并为 **{len(groups)}** 个零件：\n")
+            for i, g in enumerate(groups[:10], 1):
+                parts.append(f"{i}. {self._format_group(g)}")
+            if len(groups) > 10:
                 if lang == 'en':
-                    parts.append(f"\n... {total - 10} more records")
+                    parts.append(f"\n... {len(groups) - 10} more parts")
                 elif lang == 'de':
-                    parts.append(f"\n... {total - 10} weitere Datensätze")
+                    parts.append(f"\n... {len(groups) - 10} weitere Teile")
                 else:
-                    parts.append(f"\n... 还有 {total - 10} 条记录")
+                    parts.append(f"\n... 还有 {len(groups) - 10} 个零件")
         else:
             if lang == 'en':
-                parts.append(f"🔍 **Query Results**\nSearch criteria: {field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\nFound **{total}** matching records\n")
+                parts.append(f"🔍 **Query Results**\nSearch criteria: {field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\nFound **{total}** records, consolidated into **{len(groups)}** part(s)\n")
             elif lang == 'de':
-                parts.append(f"🔍 **Abfrageergebnisse**\nSuchkriterium: {field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\n**{total}** übereinstimmende Datensätze gefunden\n")
+                parts.append(f"🔍 **Abfrageergebnisse**\nSuchkriterium: {field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\n**{total}** Datensätze, zu **{len(groups)}** Teil(en) zusammengefasst\n")
             else:
-                parts.append(f"🔍 **查询结果**\n搜索条件：{field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\n共找到 **{total}** 条匹配记录\n")
-            for i, row in enumerate(search_results[:3]):
-                src = row.get('_source_file', '')
-                sheet = row.get('_source_sheet', '')
+                parts.append(f"🔍 **查询结果**\n搜索条件：{field_desc}" + (f" = \"{search_value}\"" if search_value else "") + f"\n共找到 **{total}** 条记录，按零件号归并为 **{len(groups)}** 个零件\n")
+            for i, g in enumerate(groups[:5], 1):
                 if lang == 'en':
-                    parts.append(f"\n{'='*50}\n**Record {i+1}**" + (f" (Source: {src}/{sheet})" if src else "") + f"\n{'='*50}\n")
+                    parts.append(f"\n{'='*50}\n**Part {i}**\n{'='*50}")
                 elif lang == 'de':
-                    parts.append(f"\n{'='*50}\n**Datensatz {i+1}**" + (f" (Quelle: {src}/{sheet})" if src else "") + f"\n{'='*50}\n")
+                    parts.append(f"\n{'='*50}\n**Teil {i}**\n{'='*50}")
                 else:
-                    parts.append(f"\n{'='*50}\n**记录 {i+1}**" + (f" (来源: {src}/{sheet})" if src else "") + f"\n{'='*50}\n")
-                for k, v in row.items():
-                    if k.startswith('_'): continue
-                    if v and v != 'null' and v != '':
-                        parts.append(f"  • **{k}**: {str(v)[:300]}")
-            if total > 3:
+                    parts.append(f"\n{'='*50}\n**零件 {i}**\n{'='*50}")
+                for std_key in ('part_number', 'part_name', 'zgs', 'stage', 'ec',
+                                'fav', 'kem', 'soma', 'status', 'mg', 'br', 'responsible'):
+                    vals = g.get(std_key)
+                    if vals:
+                        label = _CONSOLIDATED_LABELS.get(std_key, std_key)
+                        parts.append(f"  • **{label}**: {', '.join(str(v) for v in vals[:15])}")
+                parts.append(f"  • _rows: {g.get('_row_count', 1)}_")
+            if len(groups) > 5:
                 if lang == 'en':
-                    parts.append(f"\n*... {total - 3} more records not shown*")
+                    parts.append(f"\n*... {len(groups) - 5} more parts not shown*")
                 elif lang == 'de':
-                    parts.append(f"\n*... {total - 3} weitere Datensätze nicht angezeigt*")
+                    parts.append(f"\n*... {len(groups) - 5} weitere Teile nicht angezeigt*")
                 else:
-                    parts.append(f"\n*... 还有 {total - 3} 条记录未显示*")
+                    parts.append(f"\n*... 还有 {len(groups) - 5} 个零件未显示*")
 
         return '\n'.join(parts)
+
+    def _format_group(self, g):
+        """归并后的单个零件 -> 一行关键信息。"""
+        segs = []
+        pn = g.get('part_number')
+        if pn:
+            segs.append(f"Part Number={pn[0]}")
+        for std_key in ('part_name', 'zgs', 'stage', 'ec', 'fav', 'kem', 'soma', 'status'):
+            vals = g.get(std_key)
+            if vals:
+                label = _CONSOLIDATED_LABELS.get(std_key, std_key)
+                shown = ', '.join(str(v) for v in vals[:6])
+                if len(vals) > 6:
+                    shown += f' +{len(vals) - 6}'
+                segs.append(f"{label}={shown}")
+        segs.append(f"[{g.get('_row_count', 1)} rows]")
+        return ' | '.join(segs)
 
     def _get_key_fields(self, row):
         parts = []
@@ -1168,20 +1599,9 @@ Geben Sie nur JSON zurück."""
                 return "Keine übereinstimmenden Daten gefunden"
             else:
                 return "未找到匹配数据"
-        lang = get_language()
-        if lang == 'en':
-            record_label = "Record"
-        elif lang == 'de':
-            record_label = "Datensatz"
-        else:
-            record_label = "记录"
-        parts = []
-        for i, row in enumerate(search_results[:5]):
-            parts.append(f"\n{record_label} {i+1}:")
-            for k, v in row.items():
-                if not k.startswith('_') and v and v != 'null' and v != '':
-                    parts.append(f"  {k}: {str(v)[:200]}")
-        return '\n'.join(parts)
+        # 同一零件号的多行（多阶段/多文件）归并提炼，避免重复罗列
+        return format_consolidated_summary(search_results, max_groups=10,
+                                           lang=get_language())
 
 
 class AgentManager:
@@ -1329,7 +1749,25 @@ class AgentManager:
                 "resolve pronouns using the conversation history and generate a complete standalone SQL.\n"
                 "5. For row queries, include 'LIMIT 100' if not already present.\n"
                 "6. Never write INSERT/UPDATE/DELETE/DDL. Query only the tables listed in the schema.\n"
-                "7. Access JSON columns with json_extract(data, '$.\"Field Name\"')."
+                "7. Access JSON columns with json_extract(data, '$.\"Field Name\"').\n"
+                "8. parts_data has ONLY these real columns: id, part_number, file_id, row_number, "
+                "data. There is NO column named 'stage' in parts_data. Stage/Baulos info lives "
+                "inside the JSON data under the key 'Build Lot Aggregate' (access via "
+                "json_extract(data, '$.\"Build Lot Aggregate\"'); a cell may contain several "
+                "stages separated by ' | ', e.g. 'AG1_TO2_Fuz | AG1_TO3_Fuz'). The part name is "
+                "the JSON key 'Name'; EC/bundle is 'Bundle Number'; KEM is 'KEM Number'. "
+                "The stage label per uploaded file is in uploaded_files.stage "
+                "(JOIN uploaded_files uf ON uf.id = parts_data.file_id).\n"
+                "9. The same part number may appear in multiple rows (one per stage/file). "
+                "For detail queries about a part, use SELECT DISTINCT or GROUP BY to avoid "
+                "duplicate rows; when listing part attributes, group by part_number and use "
+                "json_each/group_concat as needed, rather than returning repeated identical rows.\n"
+                "10. For questions about stages / phase progression / ZGS version changes, "
+                "you MUST JOIN uploaded_files uf ON uf.id = parts_data.file_id and COALESCE the "
+                "two stage sources so the stage is never blank: e.g. "
+                "COALESCE(NULLIF(json_extract(pd.data,'$.\"Build Lot Aggregate\"'),''), uf.stage) "
+                "AS stage. Do the same in the WHERE/SELECT; never return a stage/ZGS row with a "
+                "missing stage label."
             )
         if lang == 'de':
             return (
@@ -1348,7 +1786,24 @@ class AgentManager:
                 "eine vollständige, eigenständige SQL-Anfrage.\n"
                 "5. Fügen Sie bei Datensatzabfragen 'LIMIT 100' hinzu, falls nicht vorhanden.\n"
                 "6. Keine Schreiboperationen. Nur die im Schema genannten Tabellen abfragen.\n"
-                "7. JSON-Spalten mit json_extract(data, '$.\"Feldname\"') ansprechen."
+                "7. JSON-Spalten mit json_extract(data, '$.\"Feldname\"') ansprechen.\n"
+                "8. parts_data hat NUR diese echten Spalten: id, part_number, file_id, row_number, "
+                "data. Es gibt KEINE Spalte 'stage' in parts_data. Phasen-/Baulos-Informationen "
+                "stehen im JSON unter dem Schlüssel 'Build Lot Aggregate' "
+                "(json_extract(data, '$.\"Build Lot Aggregate\"'); eine Zelle kann mehrere Phasen "
+                "mit ' | ' getrennt enthalten, z.B. 'AG1_TO2_Fuz | AG1_TO3_Fuz'). Der Teilename ist "
+                "der JSON-Schlüssel 'Name', EC/Bündel ist 'Bundle Number', KEM ist 'KEM Number'. "
+                "Die Phasenbezeichnung pro Datei steht in uploaded_files.stage "
+                "(JOIN uploaded_files uf ON uf.id = parts_data.file_id).\n"
+                "9. Dieselbe Teilenummer kann in mehreren Zeilen vorkommen (pro Phase/Datei). "
+                "Verwenden Sie bei Detailabfragen SELECT DISTINCT oder GROUP BY, um doppelte "
+                "Zeilen zu vermeiden; gruppieren Sie Attribute nach Teilenummer statt "
+                "wiederholte identische Zeilen zurückzugeben.\n"
+                "10. Bei Fragen zu Phasen / Phasenfortschritt / ZGS-Versionsänderungen MÜSSEN "
+                "Sie uploaded_files uf ON uf.id = parts_data.file_id JOINEN und die beiden "
+                "Phasenquellen mit COALESCE zusammenführen, damit die Phase nie leer ist: z.B. "
+                "COALESCE(NULLIF(json_extract(pd.data,'$.\"Build Lot Aggregate\"'),''), uf.stage) "
+                "AS stage. Geben Sie nie eine Phasen-/ZGS-Zeile ohne Phasenbezeichnung zurück."
             )
         return (
             "你是一个车辆零件数据库的 SQL 专家（SQLite 方言）。\n"
@@ -1364,36 +1819,80 @@ class AgentManager:
             "4. 处理追问（如“只要有EC的”“一共多少条”）时，结合历史把指代补全成完整独立 SQL。\n"
             "5. 明细查询请加 LIMIT 100（若未指定）。\n"
             "6. 严禁 INSERT/UPDATE/DELETE/DDL。只查询 schema 中列出的表。\n"
-            "7. JSON 字段访问使用 json_extract(data, '$.\"字段名\"')。"
+            "7. JSON 字段访问使用 json_extract(data, '$.\"字段名\"')。\n"
+            "8. parts_data 只有这些真实列：id、part_number、file_id、row_number、data。"
+            "不存在名为 stage 的列！阶段/批次信息在 JSON 的 'Build Lot Aggregate' 键中"
+            "（用 json_extract(data, '$.\"Build Lot Aggregate\"') 访问；一个单元格可能用 ' | ' "
+            "分隔多个阶段，例如 'AG1_TO2_Fuz | AG1_TO3_Fuz'）；零件名是 JSON 键 'Name'，"
+            "EC/Bundle 是 'Bundle Number'，KEM 是 'KEM Number'；每个文件的阶段标签在 "
+            "uploaded_files.stage（JOIN uploaded_files uf ON uf.id = parts_data.file_id）。\n"
+            "9. 同一零件号可能在多个阶段/文件中出现多行。明细查询请用 SELECT DISTINCT 或 "
+            "GROUP BY 去重；查询零件属性时按零件号分组（可用 group_concat 合并 ZGS/阶段/EC "
+            "等取值），不要返回重复的相同行。\n"
+            "10. 凡是询问阶段/各阶段进展/ZGS 版本变化的问题，必须 JOIN uploaded_files uf ON "
+            "uf.id = parts_data.file_id，并用 COALESCE 把两个阶段来源合并，保证阶段不为空，例如："
+            "COALESCE(NULLIF(json_extract(pd.data,'$.\"Build Lot Aggregate\"'),''), uf.stage) AS stage。"
+            "不要返回阶段标签缺失的阶段/ZGS 行。"
         )
 
-    def _answer_system_prompt(self, sql_type):
+    def _answer_system_prompt(self, sql_type, rowwise=False):
         lang = get_language()
         if lang == 'en':
             base = ("You are a vehicle parts data assistant. Based on the user's question and the "
                     "retrieved data, write a concise, professional answer in English. ")
             if sql_type == 'aggregate':
                 base += "These are aggregate/statistical results; state the numbers directly."
+            elif rowwise:
+                base += ("Each numbered line is one data record with its field values (ZGS / "
+                         "Stage-Build Lot / Part Name / EC-Bundle / KEM etc.); multiple stages "
+                         "in one cell are already split and listed together. Read each line as-is "
+                         "and describe the relationship between fields (e.g. which stage(s) have "
+                         "which ZGS). NEVER invent 'Part 1/Part 2' entities or stages/values that "
+                         "are not present. If the same stage appears from multiple files, merge "
+                         "them when describing. If empty, say so.")
             else:
-                base += ("These are matching part records. Summarize the count and list at most "
-                         "5 key records (Part Number / EC / FAV / Part Name). If empty, say so.")
+                base += ("These rows have already been consolidated by part number: each line is "
+                         "one part with its distinct values (ZGS / Stage / EC-Bundle / FAV / KEM / "
+                         "Part Name). Do NOT list duplicate rows. Instead, give a refined summary: "
+                         "state how many parts were found and describe each part's key information "
+                         "across stages (e.g. which stages it appears in, ZGS changes, associated "
+                         "EC/Bundle and KEM). If empty, say so.")
             return base
         if lang == 'de':
             base = ("Sie sind ein Assistent für Fahrzeugteiledaten. Verfassen Sie auf Grundlage "
                     "der Frage und der abgerufenen Daten eine knappe, professionelle Antwort auf Deutsch. ")
             if sql_type == 'aggregate':
                 base += "Dies sind Aggregat-/Statistikergebnisse; nennen Sie die Zahlen direkt."
+            elif rowwise:
+                base += ("Jede nummerierte Zeile ist ein Datensatz mit seinen Feldwerten (ZGS / "
+                         "Stufe-Baulos / Teilbenennung / EC-Buendel / KEM usw.); mehrere Stufen "
+                         "in einer Zelle sind bereits aufgeteilt. Lesen Sie jede Zeile wie angegeben "
+                         "und beschreiben Sie die Beziehung zwischen den Feldern (z. B. welche "
+                         "Stufe(n) welchen ZGS-Wert haben). Erfinden Sie NIEMALS 'Part 1/Part 2' "
+                         "oder nicht vorhandene Stufen/Werte. Falls leer, teilen Sie dies mit.")
             else:
-                base += ("Dies sind passende Teiledatensätze. Nennen Sie die Anzahl und maximal "
-                         "5 Schlüsseldatensätze (Teilenummer / EC / FAV / Teilbenennung). "
+                base += ("Diese Zeilen wurden bereits nach Teilenummer zusammengefasst: jede Zeile "
+                         "ist ein Teil mit seinen unterschiedlichen Werten (ZGS / Phase / EC-Bundle / "
+                         "FAV / KEM / Teilbenennung). Listen Sie KEINE doppelten Zeilen auf. "
+                         "Fassen Sie stattdessen zusammen: nennen Sie die Anzahl der Teile und "
+                         "beschreiben Sie je Teil die phasenübergreifenden Informationen "
+                         "(verfügbare Phasen, ZGS-Änderungen, zugehörige EC/Bundle und KEM). "
                          "Falls leer, teilen Sie dies mit.")
             return base
         base = "你是车辆零件数据助手。根据用户问题和检索到的数据，用中文给出简洁、专业的回答。"
         if sql_type == 'aggregate':
             base += "这是统计结果，请直接陈述数字。"
+        elif rowwise:
+            base += ("下面每条编号记录都是一行真实数据，括号内给出该行各字段的值（ZGS / 阶段-Build Lot / "
+                     "零件名称 / EC-Bundle / KEM 等）；一个单元格里的多个阶段已经拆开并列在一起。"
+                     "请逐行如实读取，说明字段之间的对应关系（例如哪些阶段对应哪个 ZGS 值、ZGS 从几变为几），"
+                     "不要编造 'Part 1/Part 2' 之类的数据里不存在的零件或阶段，也不要臆造没有的取值。"
+                     "同一阶段来自多个文件时，描述时可合并。如果没有结果请如实告知。")
         else:
-            base += ("这是匹配的零件记录。请说明总条数，最多列出 5 条关键记录"
-                     "（零件号 / EC / FAV / 零件名称）；如果没有结果请如实告知。")
+            base += ("下面的数据已按零件号归并：每行是一个零件，括号内列出该零件在各阶段/文件中的"
+                     "不同取值（ZGS / 阶段 / EC-Bundle / FAV / KEM / 零件名称）。请勿罗列重复行，"
+                     "而是做提炼总结：说明共涉及多少个零件，并逐个说明该零件出现在哪些阶段、"
+                     "ZGS 如何变化、配套哪些 EC/Bundle 与 KEM 等关键信息；如果没有结果请如实告知。")
         return base
 
     @staticmethod
@@ -1463,10 +1962,34 @@ class AgentManager:
                                'nl2sql_plan': plan},
                     'search_results': None, 'mode': None}
 
-        # 执行只读 SQL
+        # 执行只读 SQL；失败时把报错反馈给 LLM 重试一次 (常见: 幻觉不存在的列)
         results, columns, err = db_manager.execute_readonly_sql(sql)
         if err:
-            print(f"[Agent] SQL execution failed: {err} | SQL={sql}")
+            print(f"[Agent] SQL execution failed (attempt 1): {err} | SQL={sql}")
+            retry_msgs = list(messages) + [
+                {'role': 'assistant', 'content': json.dumps(plan, ensure_ascii=False)},
+                {'role': 'user', 'content': (
+                    f"The SQL failed with this database error: {err}\n"
+                    f"Your SQL was: {sql}\n"
+                    "Please fix the SQL. Remember: parts_data only has columns "
+                    "id, part_number, file_id, row_number, data (JSON). Stage/Baulos "
+                    "values live in json_extract(data, '$.\"Build Lot Aggregate\"'); "
+                    "part name is json_extract(data, '$.\"Name\"'); EC/bundle is "
+                    "json_extract(data, '$.\"Bundle Number\"'); file stage "
+                    "labels are in uploaded_files.stage (JOIN on file_id). "
+                    "Output the same strict JSON format again with the corrected SQL.")},
+            ]
+            raw2 = active_agent.chat(retry_msgs, system_prompt=system_prompt,
+                                     temperature=0.0, stage='SQL 修正')
+            plan2 = self._extract_json(raw2)
+            sql2 = (plan2 or {}).get('sql', '').strip() if isinstance(plan2, dict) else ''
+            if sql2 and sql2 != sql:
+                results, columns, err = db_manager.execute_readonly_sql(sql2)
+                if not err:
+                    sql, plan = sql2, plan2
+                    print("[Agent] SQL retry succeeded")
+        if err:
+            print(f"[Agent] SQL execution failed after retry: {err}")
             # 把错误信息回传，让上层走 rule 兜底
             return None
 
@@ -1484,28 +2007,51 @@ class AgentManager:
 
     def _generate_answer(self, active_agent, user_query, history_messages,
                          sql, sql_type, results, columns):
-        """让 LLM 基于查询结果生成自然语言回答；失败时回退到简易文本。"""
-        # 构造结果摘要（传入 LLM）
-        if sql_type == 'aggregate':
-            summary_lines = []
-            for row in results[:20]:
-                summary_lines.append(' | '.join(f"{k}={v}" for k, v in row.items()))
-            data_summary = '\n'.join(summary_lines) if summary_lines else '(no rows)'
-        else:
-            total = len(results)
-            summary_lines = [f"(returned {total} rows, showing up to 10)"]
-            for row in results[:10]:
-                key_parts = []
-                for k in ('part_number', 'Part Number', 'BuendelNr', 'FAV_fav',
-                          'teilbenennung', 'Teilbenennung', 'SOMA in ZEUS',
-                          'Baulos_aggr', 'status'):
-                    v = row.get(k)
-                    if v not in (None, '', 'null'):
-                        key_parts.append(f"{k}={v}")
-                summary_lines.append('; '.join(key_parts[:6]) or '(empty row)')
-            data_summary = '\n'.join(summary_lines)
+        """让 LLM 基于查询结果生成自然语言回答；明细类直接返回确定性提炼摘要。
 
-        answer_sys = self._answer_system_prompt(sql_type)
+        本地小模型(3b)对表格数据改写时容易张冠李戴/臆造阶段，而
+        format_consolidated_summary / format_rowwise_summary 已经完成
+        去重、按零件号归并、多阶段拆分与 ZGS 归一，因此明细类查询直接
+        返回该确定性文本；聚合统计/闲聊仍交给 LLM 组织语言。
+        """
+        lang = get_language()
+        if not results:
+            if sql_type != 'aggregate':
+                if lang == 'en':
+                    return "No matching records found."
+                if lang == 'de':
+                    return "Keine übereinstimmenden Datensätze gefunden."
+                return "未找到匹配的记录。"
+
+        # 明细类查询：使用确定性提炼摘要，避免 LLM 臆造
+        if sql_type != 'aggregate':
+            col_std = [_rowwise_std_key(c) for c in (columns or [])]
+            if 'part_number' in col_std or any(
+                    ('part_number' in row or 'Part Number' in row)
+                    for row in (results or [])[:5]):
+                summary = format_consolidated_summary(
+                    results, max_groups=10, lang=lang)
+            else:
+                summary = format_rowwise_summary(results, lang=lang, columns=columns)
+            if summary:
+                if lang == 'en':
+                    lead = ("Here is the refined summary (duplicates merged, "
+                            "multi-stage cells split):")
+                elif lang == 'de':
+                    lead = ("Hier ist die zusammengefasste Übersicht "
+                            "(Duplikate zusammengefasst, Mehrfach-Stufen aufgeteilt):")
+                else:
+                    lead = "以下为提炼结果（已合并重复、拆分多阶段）："
+                return f"{lead}\n{summary}"
+
+        # 构造结果摘要（传入 LLM）—— 聚合统计类
+        data_summary_fmt = 'aggregate'
+        summary_lines = []
+        for row in results[:20]:
+            summary_lines.append(' | '.join(f"{k}={v}" for k, v in row.items()))
+        data_summary = '\n'.join(summary_lines) if summary_lines else '(no rows)'
+
+        answer_sys = self._answer_system_prompt(sql_type, rowwise=False)
         answer_messages = list(history_messages[:-1])  # 不含当前 user query
         prompt = (
             f"User question: {user_query}\n\n"
@@ -1544,23 +2090,40 @@ class AgentManager:
                     ', '.join(f"{k}={v}" for k, v in r.items()) for r in results[:5])
             return f"统计结果（共 {total} 行）：" + '; '.join(
                 ', '.join(f"{k}={v}" for k, v in r.items()) for r in results[:5])
+        # 明细：按零件号归并提炼，避免重复罗列
+        groups = consolidate_rows(results)
         if lang == 'en':
-            head = f"Found **{total}** matching record(s)."
+            head = (f"Found **{total}** matching record(s), consolidated into "
+                    f"**{len(groups)}** part(s):")
         elif lang == 'de':
-            head = f"**{total}** übereinstimmende Datensatz(e) gefunden."
+            head = (f"**{total}** übereinstimmende Zeile(n) gefunden, zu "
+                    f"**{len(groups)}** Teil(en) zusammengefasst:")
         else:
-            head = f"共找到 **{total}** 条匹配记录。"
+            head = f"共找到 **{total}** 条记录，按零件号归并为 **{len(groups)}** 个零件："
         lines = [head]
-        for i, row in enumerate(results[:5], 1):
-            parts = []
-            for k in ('part_number', 'Part Number', 'BuendelNr', 'FAV_fav',
-                      'teilbenennung', 'Teilbenennung'):
-                v = row.get(k)
-                if v not in (None, '', 'null'):
-                    parts.append(f"{k}={v}")
-            lines.append(f"{i}. " + (' | '.join(parts) if parts else '(record)'))
-        if total > 5:
-            lines.append('...' if lang != 'zh' else f'... 还有 {total - 5} 条')
+        for i, g in enumerate(groups[:10], 1):
+            segs = []
+            pn = g.get('part_number')
+            if pn:
+                segs.append(f"Part Number: {pn[0]}")
+            for std_key in ('part_name', 'zgs', 'stage', 'ec', 'fav', 'kem',
+                            'soma', 'status'):
+                vals = g.get(std_key)
+                if vals:
+                    label = _CONSOLIDATED_LABELS.get(std_key, std_key)
+                    shown = ', '.join(str(v) for v in vals[:8])
+                    if len(vals) > 8:
+                        shown += f' ...(+{len(vals) - 8})'
+                    segs.append(f"{label}: {shown}")
+            lines.append(f"{i}. " + (' | '.join(segs) if segs else '(record)')
+                         + f"  ({g.get('_row_count', 1)} rows)")
+        if len(groups) > 10:
+            if lang == 'en':
+                lines.append(f"... {len(groups) - 10} more part(s)")
+            elif lang == 'de':
+                lines.append(f"... {len(groups) - 10} weitere Teil(e)")
+            else:
+                lines.append(f"... 另有 {len(groups) - 10} 个零件未列出")
         return '\n'.join(lines)
 
     def _handle_compare(self, user_query, compare_intent):

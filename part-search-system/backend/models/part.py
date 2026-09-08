@@ -20,6 +20,15 @@ def norm(value) -> str:
     return str(value).strip()
 
 
+def norm_zgs(value) -> str:
+    """Normalize a ZGS cell: trim and strip leading zeros for pure-digit
+    values so that '005' and '5' compare equal across data sources."""
+    v = norm(value)
+    if v.isdigit():
+        return str(int(v))
+    return v
+
+
 # Raw status values that are placeholders / data-entry errors, not categories.
 #  - 'null'/'none'/'nan': source cells literally contain the word "null" (export artifact)
 #  - values containing '|': a few rows have pipe-joined IDs/step codes mis-entered into
@@ -116,10 +125,24 @@ class Part:
     file_id: int
     row_id: int
     data: dict
+    # 同一阶段文件内同 PN 多行时，该 PN 出现过的全部 ZGS 取值集合
+    zgs_values: Optional[set] = None
     # None -> PN not present in ENIGMA; dict of sets -> present (possibly empty values)
     enigma_values: Optional[Dict[str, set]] = None
     # ENIGMA 主表完整参考记录 (单条, 同 PN 多行已合并), 纯参考不参与对比
     enigma_record: Optional[dict] = None
+
+    def merge_zgs(self, other: 'Part') -> None:
+        """合并同阶段同 PN 另一条记录的 ZGS 取值（多行多 ZGS 场景）。"""
+        merged = (self.zgs_values or {self.zgs}) | (other.zgs_values or {other.zgs})
+        merged.discard('')
+        self.zgs_values = merged
+        if merged:
+            zgs_joined = ','.join(sorted(merged, key=lambda z: (len(z), z)))
+            self.zgs = zgs_joined
+            # 同步写回 data，保证字段级 diff 看到的是合并后的 ZGS
+            if business_column('zgs') in self.data or business_column('zgs') in other.data:
+                self.data[business_column('zgs')] = zgs_joined
 
     def value(self, business_key: str) -> str:
         """业务字段取值: BOM 原始数据优先, 没有则回退到 ENIGMA 参考记录。
@@ -210,13 +233,15 @@ class Part:
     def from_row(cls, row_id, file_id, pn, data, stage='', enigma_values=None,
                  enigma_record=None) -> 'Part':
         data = data or {}
+        zgs = norm_zgs(data.get(business_column('zgs')))
         return cls(
             pn=norm(pn),
-            zgs=norm(data.get(business_column('zgs'))),
+            zgs=zgs,
             stage=stage,
             file_id=file_id,
             row_id=row_id,
             data=data,
+            zgs_values={zgs} if zgs else set(),
             enigma_values=enigma_values,
             enigma_record=enigma_record,
         )
@@ -387,7 +412,10 @@ class StageCatalog:
             from_part = self.get(pn)
             to_part = other.get(pn)
             if from_part and to_part:
-                if from_part.zgs == to_part.zgs:
+                # 同 PN 多行 ZGS 已合并为集合：两侧 ZGS 集合有交集即视为该 PN 在两阶段间无 ZGS 变更
+                from_zs = from_part.zgs_values or ({from_part.zgs} if from_part.zgs else set())
+                to_zs = to_part.zgs_values or ({to_part.zgs} if to_part.zgs else set())
+                if from_zs & to_zs:
                     continue
                 match_type = 'zgs_upgraded'
             elif to_part:

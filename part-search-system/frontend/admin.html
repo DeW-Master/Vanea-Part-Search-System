@@ -1265,6 +1265,7 @@
                                 <option value="pre-TO">pre-TO</option>
                                 <option value="TO1">TO1</option>
                                 <option value="TO2">TO2</option>
+                                <option value="TO3">TO3</option>
                             </select>
                         </div>
                         <input type="file" id="bomFileInput" accept=".xlsx,.xlsm" style="display:none;">
@@ -2613,7 +2614,7 @@
 
         // ===== File Upload & Analyze =====
         let currentUploadType = 'supplementary'; // 'BOM' or 'supplementary'
-        let currentUploadStage = null; // 'pre-TO' / 'TO1' / 'TO2' for BOM uploads
+        let currentUploadStage = null; // 'pre-TO' / 'TO1' / 'TO2' / 'TO3' for BOM uploads
 
         function handleBomFileSelect(file) {
             if (!file) return;

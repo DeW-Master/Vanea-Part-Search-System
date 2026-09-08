@@ -204,9 +204,10 @@ SESSION_USE_SIGNER = os.environ.get("SESSION_USE_SIGNER", "true").lower() == "tr
 SESSION_KEY_PREFIX = os.environ.get("SESSION_KEY_PREFIX", "fbrain_session:")
 
 # 会话最大空闲时间（秒）：超过该时间没有任何请求即视为过期并回收资源
-# 默认 60s = 1 分钟。可通过环境变量 SESSION_IDLE_TIMEOUT_SECONDS 调整。
-# 设为 0 或负数表示禁用空闲超时。
-SESSION_IDLE_TIMEOUT_SECONDS = int(os.environ.get("SESSION_IDLE_TIMEOUT_SECONDS", "60"))
+# 默认 0 = 禁用空闲回收（管理员登录后在 SESSION_LIFETIME_SECONDS 内保持登录，
+# 不再每分钟被踢出要求重新输入密码）。可通过环境变量 SESSION_IDLE_TIMEOUT_SECONDS
+# 调整为正数（秒）来启用空闲超时。
+SESSION_IDLE_TIMEOUT_SECONDS = int(os.environ.get("SESSION_IDLE_TIMEOUT_SECONDS", "0"))
 
 # 文件 Session 目录 (SESSION_TYPE=filesystem 时使用)
 SESSION_FILE_DIR = os.environ.get("SESSION_FILE_DIR", os.path.join(DATA_DIR, 'sessions'))
@@ -229,7 +230,7 @@ PART_NUMBER_HEADERS = [
 # 阶段权威来源: 上传时选择的 uploaded_files.stage (pre-TO/TO1/TO2, BOM文件) + 关联 file_id。
 # 不再依赖 Baulos_aggr 文本 PRO1/PRO2 匹配 (旧逻辑会把 supplementary 文件行也卷进来导致全 0)。
 DELTA_STAGE_FIELD = "Build Lot Aggregate"  # 保留仅作参考/向后兼容，实际 stage 取 uploaded_files.stage
-DELTA_STAGE_VALUES = ["pre-TO", "TO1", "TO2"]
+DELTA_STAGE_VALUES = ["pre-TO", "TO1", "TO2", "TO3"]
 
 # Dashboard 业务字段的 unified_name 映射 (供 database.py 内部使用)
 # 旧德文字段名 -> 新统一英文名:
