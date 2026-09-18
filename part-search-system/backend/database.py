@@ -15,6 +15,9 @@ import openpyxl
 
 from config import DB_PATH, PART_NUMBER_HEADERS, DB_TYPE
 from models import Part, StageCatalog, determine_change_type, norm
+from log_config import get_logger
+
+logger = get_logger("database")
 
 db_lock = threading.Lock()
 
@@ -621,7 +624,7 @@ class DatabaseManager:
                     fixed += 1
             if fixed:
                 conn.commit()
-                print(f"[DB] migration: trimmed part_number whitespace on {fixed} row(s)")
+                logger.info("migration: trimmed part_number whitespace on %s row(s)", fixed)
             conn.close()
 
     # ===== 文件管理 =====
@@ -906,7 +909,8 @@ class DatabaseManager:
         # 导入后清理：检测并删除全空列
         removed_cols = self._remove_empty_columns()
         if removed_cols:
-            print(f"[DB] post-import cleanup: removed {len(removed_cols)} all-empty column(s): {removed_cols}")
+            logger.info("post-import cleanup: removed %s all-empty column(s): %s",
+                        len(removed_cols), removed_cols)
 
         return results
 
@@ -1217,55 +1221,107 @@ class DatabaseManager:
             rows = cur.fetchall()
             cols = [d[0] for d in (cur.description or [])]
             # 对于 parts_data 行，展开 JSON 为业务字段（和 search_by_field 保持一致）
-            results = []
             is_parts_rows = ('id' in cols and 'part_number' in cols and 'data' in cols)
             if is_parts_rows:
-                file_ids = set()
-                parsed = []
-                for row in rows:
-                    rd = dict(row)
-                    data = {}
-                    try:
-                        data = json.loads(rd.get('data') or '{}')
-                    except Exception:
-                        data = {}
-                    data['_file_id'] = rd.get('file_id')
-                    data['_row_number'] = rd.get('row_number')
-                    data['_record_id'] = rd.get('id')
-                    # 零件号只保留规范化列 part_number（与 JSON 内 'Part Number' 同义，
-                    # 不再注入重复键，避免下游摘要出现 part_number=X; Part Number=X 的重复）
-                    pn_val = (rd.get('part_number') or '').strip()
-                    data['part_number'] = pn_val
-                    data.pop('Part Number', None)
-                    parsed.append(data)
-                    if data['_file_id'] is not None:
-                        file_ids.add(data['_file_id'])
-                file_names = {}
-                if file_ids:
-                    placeholders = ','.join('?' * len(file_ids))
-                    fsql = (f'SELECT id, original_filename, sheet_name '
-                            f'FROM uploaded_files WHERE id IN ({placeholders})')
-                    if DB_TYPE == 'postgresql':
-                        fsql = _pg_sql(fsql)
-                    frows = conn.execute(fsql, list(file_ids)).fetchall()
-                    file_names = {r['id']: {'filename': r['original_filename'],
-                                            'sheet': r['sheet_name']} for r in frows}
-                for r in parsed:
-                    fid = r.get('_file_id')
-                    r['_source_file'] = file_names.get(fid, {}).get('filename', '')
-                    r['_source_sheet'] = file_names.get(fid, {}).get('sheet', '')
-                    results.append(r)
-                # 更新 columns 为展开后的业务字段（取首条 keys）
-                if results:
-                    cols = [k for k in results[0].keys() if not k.startswith('_source')]
-            else:
-                for row in rows:
-                    results.append({k: row[k] for k in cols})
+                results, cols = self._expand_parts_rows(conn, rows)
+                return results, cols, None
+            # 窄投影明细结果（只查了件号/ID 等少量列）：按件号/ID 回查补齐全字段，
+            # 避免前端“只看到件号”。聚合/统计查询不在此列。
+            if not is_aggregate:
+                widened = self._widen_narrow_parts_rows(conn, cols, rows)
+                if widened is not None:
+                    w_results, w_cols = widened
+                    return w_results, w_cols, None
+            results = [{k: row[k] for k in cols} for row in rows]
             return results, cols, None
         except Exception as e:
             return [], [], str(e)
         finally:
             conn.close()
+
+    def _expand_parts_rows(self, conn, rows):
+        """把 SELECT id, part_number, file_id, row_number, data 的原始行展开为
+        业务字段 dict 列表，并拼上来源文件/工作表信息。返回 (results, columns)。"""
+        file_ids = set()
+        parsed = []
+        for row in rows:
+            rd = dict(row)
+            try:
+                data = json.loads(rd.get('data') or '{}')
+            except Exception:
+                data = {}
+            data['_file_id'] = rd.get('file_id')
+            data['_row_number'] = rd.get('row_number')
+            data['_record_id'] = rd.get('id')
+            # 零件号只保留规范化列 part_number（与 JSON 内 'Part Number' 同义，
+            # 不再注入重复键，避免下游摘要出现 part_number=X; Part Number=X 的重复）
+            pn_val = (rd.get('part_number') or '').strip()
+            data['part_number'] = pn_val
+            data.pop('Part Number', None)
+            parsed.append(data)
+            if data['_file_id'] is not None:
+                file_ids.add(data['_file_id'])
+        file_names = {}
+        if file_ids:
+            placeholders = ','.join('?' * len(file_ids))
+            fsql = (f'SELECT id, original_filename, sheet_name '
+                    f'FROM uploaded_files WHERE id IN ({placeholders})')
+            if DB_TYPE == 'postgresql':
+                fsql = _pg_sql(fsql)
+            frows = conn.execute(fsql, list(file_ids)).fetchall()
+            file_names = {r['id']: {'filename': r['original_filename'],
+                                    'sheet': r['sheet_name']} for r in frows}
+        results = []
+        for r in parsed:
+            fid = r.get('_file_id')
+            r['_source_file'] = file_names.get(fid, {}).get('filename', '')
+            r['_source_sheet'] = file_names.get(fid, {}).get('sheet', '')
+            results.append(r)
+        cols = ([k for k in results[0].keys() if not k.startswith('_source')]
+                if results else [])
+        return results, cols
+
+    def _widen_narrow_parts_rows(self, conn, cols, rows):
+        """检测窄投影明细结果（投影了零件号但缺 data 全字段），按件号回查
+        parts_data 全字段并展开。不属于该情形时返回 None。
+
+        仅以 part_number 列为触发条件，避免误伤 uploaded_files 等其他表的
+        id 列查询；聚合/统计查询由调用方提前排除。
+        """
+        if not rows:
+            return None
+        col_lower = {c.lower(): c for c in cols}
+        if 'data' in col_lower:
+            return None
+        pn_col = col_lower.get('part_number')
+        if pn_col is None:
+            return None
+        # JOIN 带 file_id/阶段限定时，回查取该零件全部行，下游汇总按零件号
+        # 归并，语义为“这些零件的完整信息”。
+        pn_vals = []
+        seen = set()
+        for row in rows:
+            try:
+                v = row[pn_col]
+            except Exception:
+                v = None
+            if v is None:
+                continue
+            v = str(v).strip()
+            if v and v not in seen:
+                seen.add(v)
+                pn_vals.append(v)
+        if not pn_vals:
+            return None
+        placeholders = ','.join('?' * len(pn_vals))
+        sql = ('SELECT id, part_number, file_id, row_number, data FROM parts_data '
+               f'WHERE part_number IN ({placeholders}) LIMIT 100')
+        if DB_TYPE == 'postgresql':
+            sql = _sqlite_to_pg(sql)
+        wide_rows = conn.execute(sql, pn_vals).fetchall()
+        if not wide_rows:
+            return None
+        return self._expand_parts_rows(conn, wide_rows)
 
     def update_cell(self, record_id, field_name, value):
         """更新单个单元格"""
@@ -1761,7 +1817,7 @@ class DatabaseManager:
             try:
                 field_expr = _json_field(field)
             except ValueError:
-                print(f"[DB] ignoring invalid field name: {field!r}")
+                logger.warning("ignoring invalid field name: %r", field)
                 continue
 
             if operator == 'eq':
@@ -1889,6 +1945,173 @@ class DatabaseManager:
                 if v:
                     entry[key].add(v)
         return idx
+
+    def _load_kem_released_pns(self, conn):
+        """加载 supplementary (ENIGMA 主表) 中存在 KEM 释放记录的 PN 集合。
+
+        判定: 'Productive KEM Release Status' 非空且非占位值
+        ('null'/'-' 等), FU… 释放单与 EO… 状态均视为已释放。
+        返回: set(pn)
+        """
+        placeholders = {'', 'null', 'none', '-', 'n/a', 'na', '/'}
+        col = 'Productive KEM Release Status'
+        rows = conn.execute(
+            "SELECT part_number, data FROM parts_data pd "
+            "JOIN uploaded_files uf ON uf.id = pd.file_id "
+            "WHERE uf.file_type = 'supplementary' AND uf.status = 'active'"
+        ).fetchall()
+        released = set()
+        for r in rows:
+            pn = norm(r['part_number'])
+            if not pn:
+                continue
+            try:
+                d = json.loads(r['data'])
+            except Exception:
+                continue
+            v = str(d.get(col, '')).strip().lower()
+            if v and v not in placeholders:
+                released.add(pn)
+        return released
+
+    def _load_enigma_entity_rows(self, conn):
+        """加载 supplementary (ENIGMA 主表) 每个 PN 的实体级行记录。
+
+        与 _load_enigma_value_index (只收集 EC/FAV/KEM/SOMA 值集合) 不同,
+        这里保留每个实体 (Bundle Number / FAV) 与其流程状态、KEM、SOMA 的
+        行级对应, 用于 EC/ZEUS 状态分布 (按去重实体计数) 与饼块下钻明细。
+
+        返回: {pn: [{'ec','ec_status','fav','fav_status','kem','soma'}, ...]}
+        列名走 DELTA_BUSINESS_FIELDS 业务键映射。
+        """
+        from config import DELTA_BUSINESS_FIELDS
+        bf = DELTA_BUSINESS_FIELDS
+        rows = conn.execute(
+            "SELECT part_number, data FROM parts_data pd "
+            "JOIN uploaded_files uf ON uf.id = pd.file_id "
+            "WHERE uf.file_type = 'supplementary' AND uf.status = 'active' "
+            "ORDER BY pd.id"
+        ).fetchall()
+        out = {}
+        for r in rows:
+            pn = norm(r['part_number'])
+            if not pn:
+                continue
+            try:
+                d = json.loads(r['data'])
+            except Exception:
+                continue
+            out.setdefault(pn, []).append({
+                'ec': str(d.get(bf['ec'], '')).strip(),
+                'ec_status': str(d.get(bf['ec_status'], '')).strip(),
+                'fav': str(d.get(bf['fav'], '')).strip(),
+                'fav_status': str(d.get(bf['fav_status'], '')).strip(),
+                'kem': str(d.get(bf['kem'], '')).strip(),
+                'soma': str(d.get(bf['soma'], '')).strip(),
+            })
+        return out
+
+    def _stage_status_distribution(self, pns, entity_rows, kind):
+        """计算某阶段 PN 集合的 EC/ZEUS 状态分布 (按去重实体计数)。
+
+        kind='ec' 以 Bundle Number 为实体, kind='zeus' 以 FAV 为实体;
+        实体在 ENIGMA 状态唯一, 用 (实体, 显示状态) 去重, 跳过占位/管道脏值。
+        返回: [{name, value}], 按数量降序。
+        """
+        from models.part import _valid_status, status_label
+        entity_key = 'ec' if kind == 'ec' else 'fav'
+        status_key = 'ec_status' if kind == 'ec' else 'fav_status'
+        business_key = 'ec_status' if kind == 'ec' else 'fav_status'
+        pair_to_label = {}
+        for pn in pns:
+            for row in entity_rows.get(pn, []):
+                entity = row[entity_key]
+                raw_status = row[status_key]
+                if entity and _valid_status(raw_status):
+                    pair_to_label[(entity, raw_status)] = \
+                        status_label(business_key, raw_status)
+        counts = {}
+        for label in pair_to_label.values():
+            counts[label] = counts.get(label, 0) + 1
+        return [{'name': n, 'value': c}
+                for n, c in sorted(counts.items(), key=lambda x: x[1], reverse=True)]
+
+    def get_status_drilldown(self, stage, kind, status_label_value,
+                             search='', page=1, page_size=50):
+        """某阶段 + 某状态下的实体级明细 (饼块下钻)。
+
+        以该阶段 BOM 的 PN 集合为范围, 返回处于指定显示状态的去重实体
+        (EC=Bundle Number / ZEUS=FAV), 含 PN、实体号、KEM、SOMA。
+        """
+        from config import DELTA_STAGE_VALUES
+        from models.part import _valid_status, status_label
+        if stage not in DELTA_STAGE_VALUES or kind not in ('ec', 'zeus'):
+            return {'items': [], 'total': 0, 'page': page, 'page_size': page_size}
+        conn = get_db()
+        try:
+            enigma_index = self._load_enigma_value_index(conn)
+            catalog = self._build_stage_catalog(
+                conn, stage, enigma_index=enigma_index)
+            entity_rows = self._load_enigma_entity_rows(conn)
+        finally:
+            conn.close()
+        if not catalog:
+            return {'items': [], 'total': 0, 'page': page, 'page_size': page_size}
+
+        entity_key = 'ec' if kind == 'ec' else 'fav'
+        status_key = 'ec_status' if kind == 'ec' else 'fav_status'
+        business_key = 'ec_status' if kind == 'ec' else 'fav_status'
+        target = (status_label_value or '').strip()
+
+        # 实体去重: 同一实体状态唯一, 合并其 KEM/SOMA 参考值
+        entities = {}
+        for pn in catalog.pns:
+            for row in entity_rows.get(pn, []):
+                entity = row[entity_key]
+                if not entity or not _valid_status(row[status_key]):
+                    continue
+                if status_label(business_key, row[status_key]) != target:
+                    continue
+                rec = entities.setdefault(entity, {
+                    'pn': pn,
+                    'ec': row['ec'] if kind == 'ec' else '',
+                    'fav': row['fav'] if kind == 'zeus' else '',
+                    'status': target,
+                    'kems': set(),
+                    'somas': set(),
+                })
+                if row['kem']:
+                    rec['kems'].add(row['kem'])
+                if row['soma']:
+                    rec['somas'].add(row['soma'])
+
+        items = []
+        for entity, rec in entities.items():
+            items.append({
+                'pn': rec['pn'],
+                'entity': entity,
+                'ec': rec['ec'],
+                'fav': rec['fav'],
+                'status': rec['status'],
+                'kem': ', '.join(sorted(rec['kems'])),
+                'soma': ', '.join(sorted(rec['somas'])),
+            })
+        items.sort(key=lambda x: x['pn'])
+
+        search = (search or '').strip().lower()
+        if search:
+            items = [it for it in items
+                     if search in it['pn'].lower()
+                     or search in it['entity'].lower()
+                     or search in it['kem'].lower()]
+        total = len(items)
+        start = (max(1, page) - 1) * page_size
+        return {
+            'items': items[start:start + page_size],
+            'total': total,
+            'page': page,
+            'page_size': page_size,
+        }
 
     def _build_stage_catalog(self, conn, stage, part_number=None,
                              enigma_map=None, enigma_index=None):
@@ -2367,34 +2590,66 @@ class DatabaseManager:
         # 前三个阶段数据齐全即视为有效（向后兼容）
         valid = all(catalogs[s] for s in ('pre-TO', 'TO1', 'TO2'))
 
-        # === 4. 柱状折线图数据 ===
-        # 以 PN 对齐: 每个阶段统计该阶段 BOM 内所有 PN 关联的去重 EC
-        # (Bundle Number) 数量与 ZEUS/FAV 数量 (ec_count/fav_count)。
-        # 注意: bar_line 走 enigma_map (同 PN 合并为单条记录),
-        # 与旧版 SQL 统计富化后 parts_data 的口径一致 (KPI 数值不变)。
-        from config import DELTA_BUSINESS_FIELDS
-        ec_col = DELTA_BUSINESS_FIELDS['ec']
-        fav_col = DELTA_BUSINESS_FIELDS['fav']
+        # === 4. 折线图数据 (四条线, 按阶段 pre-TO→TO1→TO2→TO3) ===
+        # EC / ZEUS: 该阶段 BOM 的 PN 集合在 ENIGMA 主表中关联的去重
+        #   Bundle Number / FAV 数量 (同 PN 多行多值全部收集, 清洗占位值)。
+        # ZGS 升级 PN: 相对 pre-TO 基线的累计升级 PN 数 (同 PN 两阶段 ZGS
+        #   集合无交集即升级, 与 delta_pairs 官方口径一致), pre-TO 点为 0。
+        # KEM 释放 PN: 该阶段 BOM 的 PN 中, ENIGMA 'Productive KEM Release
+        #   Status' 存在非占位释放记录的去重 PN 数。
         stages_order = DELTA_STAGE_VALUES
+        placeholders = {'', 'null', 'none', '-', 'n/a', 'na', '/'}
 
-        def _bar_unique_vals(stage, col_name):
-            vals = set()
-            if not catalogs.get(stage):
-                return 0
-            for pn in catalogs[stage].pns:
-                rec = enigma_map.get(pn)
-                if not rec:
-                    continue
-                v = rec.get(col_name)
-                if v not in (None, ''):
-                    vals.add(v)
-            return len(vals)
+        def _clean(vals):
+            return {v for v in (vals or set())
+                    if str(v).strip().lower() not in placeholders}
+
+        kem_released_pns = self._load_kem_released_pns(conn)
+        base_catalog = catalogs.get(stages_order[0])
+
+        ec_counts, fav_counts = [], []
+        zgs_upgrade_counts, kem_release_counts = [], []
+        for s in stages_order:
+            catalog = catalogs.get(s)
+            ec_vals, fav_vals = set(), set()
+            if catalog:
+                for part in catalog.parts.values():
+                    ec_vals |= _clean(part.ec_values)
+                    fav_vals |= _clean(part.fav_values)
+                kem_release_counts.append(len(catalog.pns & kem_released_pns))
+            else:
+                kem_release_counts.append(0)
+            ec_counts.append(len(ec_vals))
+            fav_counts.append(len(fav_vals))
+
+            # 相对 pre-TO 累计 ZGS 升级 PN
+            if catalog is None or base_catalog is None or s == stages_order[0]:
+                zgs_upgrade_counts.append(0)
+            else:
+                upgraded = {
+                    p.pn for p in base_catalog.delta_pairs(catalog)
+                    if p.match_type == 'zgs_upgraded'
+                }
+                zgs_upgrade_counts.append(len(upgraded))
 
         bar_line = {
             'stages': stages_order,
-            'ec_counts': [_bar_unique_vals(s, ec_col) for s in stages_order],
-            'fav_counts': [_bar_unique_vals(s, fav_col) for s in stages_order],
+            'ec_counts': ec_counts,
+            'fav_counts': fav_counts,
+            'zgs_upgrade_counts': zgs_upgrade_counts,
+            'kem_release_counts': kem_release_counts,
         }
+
+        # === 5. 各阶段 EC/ZEUS 状态分布 (按去重实体, 供环形图阶段切换) ===
+        entity_rows = self._load_enigma_entity_rows(conn)
+        stage_status = {}
+        for s in stages_order:
+            catalog = catalogs.get(s)
+            pns = catalog.pns if catalog else set()
+            stage_status[s] = {
+                'ec_pie': self._stage_status_distribution(pns, entity_rows, 'ec'),
+                'fav_pie': self._stage_status_distribution(pns, entity_rows, 'zeus'),
+            }
 
         conn.close()
 
@@ -2403,6 +2658,7 @@ class DatabaseManager:
             'stages': stage_stats,
             'available_stages': available_stages,
             'bar_line': bar_line,
+            'stage_status': stage_status,
         }
         # delta1/delta2/delta3...：统一从 delta_kpis/delta_pies 展开，
         # 保持 delta1/delta2 键名向后兼容，新增阶段自动出现 deltaN

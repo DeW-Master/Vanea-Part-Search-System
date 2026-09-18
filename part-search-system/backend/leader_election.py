@@ -20,6 +20,9 @@ from config import (
     LEADER_ELECTION_ENABLED, LEADER_LOCK_KEY, LEADER_LOCK_TTL,
     INSTANCE_ID,
 )
+from log_config import get_logger
+
+logger = get_logger("leader")
 
 
 class LeaderElector:
@@ -66,10 +69,10 @@ class LeaderElector:
                 daemon=True,
             )
             self._thread.start()
-            print(f"[Leader] election enabled, instance: {self._token}, TTL={self._ttl}s")
+            logger.info("election enabled, instance: %s, TTL=%ss", self._token, self._ttl)
         else:
             self._is_leader = True  # 禁用选举时默认是 leader (单副本模式)
-            print("[Leader] election disabled, this instance runs as leader by default")
+            logger.info("election disabled, this instance runs as leader by default")
 
     # ============== 生命周期 ==============
     def set_redis_client(self, redis_client):
@@ -83,12 +86,12 @@ class LeaderElector:
         old = self._is_leader
         self._is_leader = new_state
         if old != new_state:
-            print(f"[Leader] state changed: {'leader' if new_state else 'follower'}")
+            logger.info("state changed: %s", 'leader' if new_state else 'follower')
             for cb in self._on_change_callbacks:
                 try:
                     cb(new_state)
-                except Exception as e:
-                    print(f"[Leader] callback error: {e}")
+                except Exception:
+                    logger.warning("callback error", exc_info=True)
 
     def _loop(self):
         # 给 Redis 一点时间就绪
@@ -96,8 +99,8 @@ class LeaderElector:
         while not self._stop.is_set():
             try:
                 self._try_acquire_or_renew()
-            except Exception as e:
-                print(f"[Leader] election loop error: {e}")
+            except Exception:
+                logger.warning("election loop error", exc_info=True)
                 # Redis 故障时保守退化为 leader (避免所有实例都不跑 Delta)
                 self._fire_change(True)
             self._stop.wait(max(1, self._ttl // 3))
@@ -124,8 +127,8 @@ class LeaderElector:
             else:
                 # 其他实例是 leader
                 self._fire_change(False)
-        except Exception as e:
-            print(f"[Leader] Redis operation error: {e}")
+        except Exception:
+            logger.warning("Redis operation error", exc_info=True)
             # 网络或 Redis 故障时，短时间内保持原状态，避免抖动
             pass
 

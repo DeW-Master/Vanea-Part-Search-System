@@ -71,6 +71,11 @@ try:
 except Exception:
     pass
 
+# 统一日志: 控制台默认仅 ERROR, 全量写入 logs/app.log, 错误写入 logs/error.log
+from log_config import setup_logging, get_logger, set_request_ip, clear_request_ip
+setup_logging()
+logger = get_logger("app")
+
 from config import (
     SECRET_KEY, ADMIN_PASSWORD, UPLOAD_TEMP_DIR, ALLOWED_EXTENSIONS,
     FLASK_HOST, FLASK_PORT, APP_VERSION, APP_NAME, VERSION_HISTORY,
@@ -126,7 +131,7 @@ def _init_phase3_modules():
                 SESSION_KEY_PREFIX=SESSION_KEY_PREFIX,
             )
             Session(app)
-            print(f"[Phase3] [OK] Session: Redis (prefix={SESSION_KEY_PREFIX}, TTL={SESSION_LIFETIME_SECONDS}s)")
+            logger.info(f"Session: Redis (prefix={SESSION_KEY_PREFIX}, TTL={SESSION_LIFETIME_SECONDS}s)")
         elif SESSION_TYPE == 'filesystem':
             os.makedirs(SESSION_FILE_DIR, exist_ok=True)
             app.config.update(
@@ -138,13 +143,13 @@ def _init_phase3_modules():
                 SESSION_KEY_PREFIX=SESSION_KEY_PREFIX,
             )
             Session(app)
-            print(f"[Phase3] [OK] Session: Filesystem ({SESSION_FILE_DIR})")
+            logger.info(f"Session: Filesystem ({SESSION_FILE_DIR})")
         else:
-            print(f"[Phase3] [WARN] Session: in-memory default (single-instance only, SESSION_TYPE={SESSION_TYPE})")
+            logger.warning(f"Session: in-memory default (single-instance only, SESSION_TYPE={SESSION_TYPE})")
     except ImportError as e:
-        print(f"[Phase3] [WARN] flask-session not installed or init failed, using in-memory Session: {e}")
+        logger.warning(f"flask-session not installed or init failed, using in-memory Session: {e}", exc_info=True)
     except Exception as e:
-        print(f"[Phase3] [WARN] Session init failed, falling back to in-memory Session: {e}")
+        logger.warning(f"Session init failed, falling back to in-memory Session: {e}", exc_info=True)
 
     # 2. Prometheus Metrics
     try:
@@ -153,11 +158,11 @@ def _init_phase3_modules():
         _metrics.register_flask(app)
         # 把 Redis 命中监控挂钩到 cache_get
         _metrics.set_redis_enabled(CACHE_ENABLED and _redis_client is not None)
-        print(f"[Phase3] [OK] Metrics: enabled (endpoint /metrics)")
+        logger.info("Metrics: enabled (endpoint /metrics)")
     except ImportError as e:
-        print(f"[Phase3] [WARN] Metrics skipped (prometheus-client not installed): {e}")
+        logger.warning(f"Metrics skipped (prometheus-client not installed): {e}", exc_info=True)
     except Exception as e:
-        print(f"[Phase3] [WARN] Metrics init error: {e}")
+        logger.warning(f"Metrics init error: {e}", exc_info=True)
 
     # 3. Leader Election (领导者选举)
     try:
@@ -170,19 +175,19 @@ def _init_phase3_modules():
             _leader_elector.on_leader_change(
                 lambda is_ldr: _metrics.set_is_leader(is_ldr)
             )
-        print(f"[Phase3] [OK] Leader Election: initialized")
+        logger.info("Leader Election: initialized")
     except Exception as e:
-        print(f"[Phase3] [WARN] Leader Election init failed: {e}")
+        logger.warning(f"Leader Election init failed: {e}", exc_info=True)
 
     # 4. Ollama Load Balancer (预初始化，保证健康检查线程启动)
     try:
         from ollama_lb import get_ollama_lb
         _ollama_lb = get_ollama_lb()
         lb_status = _ollama_lb.get_all_nodes_status()
-        print(f"[Phase3] [OK] Ollama LB: {len(lb_status)} nodes "
-              f"(healthy {sum(1 for n in lb_status if n['healthy'])}/{len(lb_status)})")
+        logger.info(f"Ollama LB: {len(lb_status)} nodes "
+                    f"(healthy {sum(1 for n in lb_status if n['healthy'])}/{len(lb_status)})")
     except Exception as e:
-        print(f"[Phase3] [WARN] Ollama LB init error: {e}")
+        logger.warning(f"Ollama LB init error: {e}", exc_info=True)
 
     # 5. DB 统计初始化 (metrics gauge)
     if _metrics:
@@ -215,31 +220,118 @@ if CORS_ORIGINS:
 _redis_client = None
 _cache_enabled = CACHE_ENABLED  # 运行时可动态调整
 
+def _ensure_local_redis_running(redis_url):
+    """Redis 未运行时, 在 Windows 上自动后台拉起本机 redis-server。
+
+    仅对本机地址 (localhost/127.0.0.1) 生效; 远程 Redis 不应由本服务启动。
+    可用环境变量 REDIS_AUTOSTART=0 关闭。返回 True 表示探测到端口已在线。
+    """
+    if os.name != 'nt' or os.environ.get('REDIS_AUTOSTART', '1').lower() in ('0', 'false', 'no'):
+        return False
+    import shutil
+    import socket
+    import subprocess
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(redis_url)
+    except Exception:
+        return False
+    host = (parsed.hostname or 'localhost').lower()
+    port = parsed.port or 6379
+    if host not in ('localhost', '127.0.0.1', '::1'):
+        return False  # 远程 Redis, 不代为启动
+
+    def _port_open():
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.5)
+        try:
+            s.connect(('127.0.0.1', port))
+            return True
+        except Exception:
+            return False
+        finally:
+            s.close()
+
+    if _port_open():
+        return True
+
+    # 定位 redis-server.exe: 允许环境变量显式指定, 否则从 PATH 查找
+    exe = os.environ.get('REDIS_SERVER_PATH') or shutil.which('redis-server')
+    if not exe or not os.path.exists(exe):
+        logger.warning(
+            "Redis 未运行且未在 PATH 找到 redis-server.exe, 无法自动启动; "
+            "可安装 Redis 或设置环境变量 REDIS_SERVER_PATH 指向 redis-server.exe")
+        return False
+
+    try:
+        logger.info("Redis 未运行, 正在后台自动启动: %s --port %s", exe, port)
+        kwargs = dict(cwd=os.path.dirname(exe) or None,
+                      stdin=subprocess.DEVNULL,
+                      stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL,
+                      close_fds=True)
+        # DETACHED_PROCESS(0x00000008) | CREATE_NEW_PROCESS_GROUP(0x00000200), 独立于本控制台存活
+        flags = 0x00000008 | 0x00000200
+        if hasattr(subprocess, 'CREATE_NO_WINDOW'):
+            flags |= subprocess.CREATE_NO_WINDOW
+        kwargs['creationflags'] = flags
+        subprocess.Popen([exe, '--port', str(port)], **kwargs)
+    except Exception as e:
+        logger.warning("自动启动 Redis 失败: %s", e)
+        return False
+
+    # 等待端口就绪 (最多约 8s)
+    for _ in range(40):
+        if _port_open():
+            logger.info("Redis 已自动启动 (127.0.0.1:%s)", port)
+            return True
+        time.sleep(0.2)
+    logger.warning("已尝试启动 Redis, 但端口 %s 在等待期内未就绪", port)
+    return False
+
+
 def _init_redis():
-    """初始化 Redis 连接。失败时自动降级，不影响主功能。"""
+    """初始化 Redis 连接。失败时在 Windows 上自动拉起本机服务并重试一次; 仍失败则降级。"""
     global _redis_client, _cache_enabled
     if not CACHE_ENABLED:
-        print("[Cache] Cache disabled via config (CACHE_ENABLED=false)")
+        logger.info("Cache disabled via config (CACHE_ENABLED=false)")
         return
     try:
         import redis as redis_lib
-        _redis_client = redis_lib.Redis.from_url(
+    except ImportError:
+        logger.warning("redis module not installed, cache disabled")
+        _cache_enabled = False
+        _redis_client = None
+        return
+
+    def _connect():
+        client = redis_lib.Redis.from_url(
             REDIS_URL,
             decode_responses=True,
             socket_connect_timeout=3,
             socket_timeout=3,
             retry_on_timeout=False,
         )
-        # 测试连接
-        _redis_client.ping()
-        print(f"[Cache] Redis connected: {REDIS_URL}")
+        client.ping()
+        return client
+
+    try:
+        _redis_client = _connect()
+        logger.info(f"Redis connected: {REDIS_URL}")
         _cache_enabled = True
-    except ImportError:
-        print("[Cache] redis module not installed, cache disabled")
-        _cache_enabled = False
-        _redis_client = None
-    except Exception as e:
-        print(f"[Cache] Redis connection failed ({e}), cache disabled (auto fallback)")
+        return
+    except Exception as first_err:
+        # 连接失败: 尝试在本机自动拉起 Redis, 然后重试一次
+        if _ensure_local_redis_running(REDIS_URL):
+            try:
+                _redis_client = _connect()
+                logger.info(f"Redis connected after autostart: {REDIS_URL}")
+                _cache_enabled = True
+                return
+            except Exception as retry_err:
+                logger.warning(f"Redis retry after autostart failed ({retry_err})", exc_info=True)
+        logger.warning(f"Redis connection failed ({first_err}), cache disabled (auto fallback)")
         _cache_enabled = False
         _redis_client = None
 
@@ -273,7 +365,7 @@ def cache_get(key):
         return json.loads(raw)
     except Exception as e:
         # Redis 出错时静默失败，不影响主流程
-        print(f"[Cache] cache_get error: {e}")
+        logger.warning(f"cache_get error: {e}", exc_info=True)
         if _metrics:
             _metrics.observe_redis_error('get')
         return None
@@ -292,7 +384,7 @@ def cache_set(key, value, ttl=None):
         _redis_client.setex(key, ttl, serialized)
         return True
     except Exception as e:
-        print(f"[Cache] cache_set error: {e}")
+        logger.warning(f"cache_set error: {e}", exc_info=True)
         return False
 
 def cache_invalidate(pattern):
@@ -313,10 +405,10 @@ def cache_invalidate(pattern):
             if cursor == 0:
                 break
         if count > 0:
-            print(f"[Cache] invalidated keys: {pattern} ({count} keys)")
+            logger.info(f"invalidated keys: {pattern} ({count} keys)")
         return count
     except Exception as e:
-        print(f"[Cache] cache_invalidate error: {e}")
+        logger.warning(f"cache_invalidate error: {e}", exc_info=True)
         return 0
 
 def cache_clear_all():
@@ -562,14 +654,12 @@ def _refresh_delta_dashboard():
         leader_tag = ""
         if _leader_elector is not None:
             leader_tag = " [LEADER]"
-        print(f"[Delta]{leader_tag} dashboard data precomputed and cached")
+        logger.info(f"[Delta]{leader_tag} dashboard data precomputed and cached")
         if _metrics:
             _metrics.inc_delta_compute_run('success')
     except Exception as e:
         err_type = type(e).__name__
-        import traceback
-        traceback.print_exc()
-        print(f"[Delta] precompute error: {e}")
+        logger.warning("Delta precompute error: %s", e, exc_info=True)
         if _metrics:
             _metrics.inc_delta_compute_run('error')
             _metrics.inc_delta_compute_error(err_type)
@@ -583,18 +673,18 @@ def _delta_background_updater():
     然后每隔 DELTA_REFRESH_INTERVAL 秒刷新一次。
     """
     # 启动延迟，等待数据库就绪
-    print(f"[Delta] background precompute thread started, first run in {DELTA_INITIAL_DELAY}s...")
+    logger.info(f"[Delta] background precompute thread started, first run in {DELTA_INITIAL_DELAY}s...")
     time.sleep(DELTA_INITIAL_DELAY)
 
     while True:
         try:
             _refresh_delta_dashboard()
         except Exception as e:
-            print(f"[Delta] background refresh error: {e}")
+            logger.warning("Delta background refresh error: %s", e, exc_info=True)
 
         # 间隔为 0 表示只计算一次
         if DELTA_REFRESH_INTERVAL <= 0:
-            print("[Delta] DELTA_REFRESH_INTERVAL=0, background refresh stopped")
+            logger.info("[Delta] DELTA_REFRESH_INTERVAL=0, background refresh stopped")
             break
 
         time.sleep(DELTA_REFRESH_INTERVAL)
@@ -604,14 +694,14 @@ def start_delta_background_updater():
     仅在缓存可用且刷新间隔 > 0 时启动。
     """
     if DELTA_REFRESH_INTERVAL <= 0:
-        print("[Delta] DELTA_REFRESH_INTERVAL=0, skip background precompute thread")
+        logger.info("[Delta] DELTA_REFRESH_INTERVAL=0, skip background precompute thread")
         return
     if not _cache_enabled:
-        print("[Delta] cache disabled, skip background precompute thread")
+        logger.info("[Delta] cache disabled, skip background precompute thread")
         return
     t = threading.Thread(target=_delta_background_updater, daemon=True)
     t.start()
-    print(f"[Delta] background precompute thread started, refresh interval: {DELTA_REFRESH_INTERVAL}s")
+    logger.info(f"[Delta] background precompute thread started, refresh interval: {DELTA_REFRESH_INTERVAL}s")
 
 # 启动 Delta 后台刷新线程
 start_delta_background_updater()
@@ -622,6 +712,12 @@ def count_request():
     global _request_count
     with _request_lock:
         _request_count += 1
+
+    # 记录操作者 IP, 供本次请求内所有日志输出使用
+    try:
+        set_request_ip(get_client_ip())
+    except Exception:
+        pass
 
     # 会话空闲超时：若用户已登录但超过 SESSION_IDLE_TIMEOUT_SECONDS 没有活动，
     # 主动让出 session 资源（清空 admin_logged_in 与 _last_seen），
@@ -641,6 +737,15 @@ def count_request():
         else:
             # 活跃请求：刷新 last_seen
             session['_last_seen'] = now_ts
+
+
+@app.teardown_request
+def _clear_request_ip(exc):
+    # 请求结束清理线程本地 IP, 避免线程池复用导致日志 IP 串号
+    try:
+        clear_request_ip()
+    except Exception:
+        pass
 
 # 会话空闲回收统计
 _session_metrics_lock = threading.Lock()
@@ -1060,8 +1165,7 @@ def admin_analyze_excel():
             'mappings': all_mappings
         })
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("admin analyze failed")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1113,8 +1217,7 @@ def upload_bom():
             'stage': stage
         })
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("upload_bom failed")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1159,8 +1262,7 @@ def admin_import_excel():
             'total_imported': total_imported
         })
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("admin import failed")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1203,7 +1305,7 @@ try:
     from agent import agent_manager
     AGENT_AVAILABLE = True
 except Exception as e:
-    print(f"[Agent] Module load failed: {e}")
+    logger.error(f"Agent module load failed: {e}", exc_info=True)
     AGENT_AVAILABLE = False
     agent_manager = None
 
@@ -1273,8 +1375,7 @@ def agent_engine_switch():
         return jsonify({'success': ok, 'message': message,
                         'engine': agent_manager.engine_status()})
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("agent engine switch failed")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1354,8 +1455,97 @@ def agent_query():
             response_data['compare_result'] = result['compare_result']
         return jsonify(response_data)
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("agent query failed")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/agent/query/stream', methods=['POST'])
+def agent_query_stream():
+    """F-Brain 问答 SSE 流式接口。
+
+    逐段下发事件: stage / thinking / answer / result / error。
+    思考过程与正文实时刷新; result 为最终结构化结果 (含汇总/明细)。
+    """
+    if not AGENT_AVAILABLE:
+        return jsonify({'success': False, 'error': 'Agent module not loaded'}), 500
+    try:
+        data = request.json or {}
+        user_query = (data.get('query') or '').strip()
+        if not user_query:
+            return jsonify({'success': False, 'error': 'Query required'}), 400
+
+        lang = data.get('lang', 'zh')
+        session_id = data.get('session_id') or ''
+        client_ip = get_client_ip()
+        history = data.get('history') or []
+        if not isinstance(history, list):
+            history = []
+        clean_history = []
+        for h in history[-20:]:
+            if not isinstance(h, dict):
+                continue
+            role = h.get('role')
+            content = h.get('content')
+            if role in ('user', 'assistant', 'agent') and isinstance(content, str) and content.strip():
+                clean_history.append({
+                    'role': 'assistant' if role == 'agent' else role,
+                    'content': content.strip()[:2000],
+                })
+
+        def sse(payload):
+            return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+        def event_stream():
+            t0 = time.time()
+            final = None
+            ok = True
+            err_msg = ''
+            try:
+                gen = agent_manager.process_query_stream(
+                    user_query, lang=lang, history=clean_history,
+                    session_id=session_id, ip=client_ip)
+                for ev in gen:
+                    if not isinstance(ev, dict):
+                        continue
+                    if ev.get('type') == 'result':
+                        final = ev
+                    yield sse(ev)
+            except Exception as e:
+                ok = False
+                err_msg = str(e)
+                logger.exception("agent stream query failed")
+                try:
+                    yield sse({'type': 'error', 'message': err_msg})
+                except Exception:
+                    pass
+            finally:
+                duration_ms = int((time.time() - t0) * 1000)
+                # 按 IP 记录精简搜索日志 (与非流式接口一致)
+                try:
+                    import user_log
+                    intent = (final or {}).get('intent') or {}
+                    results = (final or {}).get('search_results')
+                    user_log.record_search(
+                        client_ip, user_query,
+                        mode=(final or {}).get('mode', ''),
+                        sql=intent.get('sql', '') if isinstance(intent, dict) else '',
+                        result_count=len(results) if isinstance(results, list) else 0,
+                        duration_ms=duration_ms, ok=ok, session_id=session_id,
+                        answer_preview=((final or {}).get('response') or err_msg))
+                except Exception:
+                    pass
+
+        return Response(
+            stream_with_context(event_stream()),
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'X-Accel-Buffering': 'no',
+                'Connection': 'keep-alive',
+            }
+        )
+    except Exception as e:
+        logger.exception("agent stream endpoint failed")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1569,8 +1759,7 @@ def get_dashboard():
         stats = db_manager.get_dashboard_stats()
         return jsonify({'success': True, 'data': stats})
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("dashboard failed")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1597,8 +1786,7 @@ def delta_dashboard():
         cache_set(cache_key, data, ttl=60)
         return jsonify({'success': True, 'data': data, 'from_cache': False})
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("delta dashboard failed")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1620,8 +1808,28 @@ def dashboard_drilldown():
         result = db_manager.get_drilldown_data(dimension, value, page, page_size)
         return jsonify({'success': True, 'data': result})
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("dashboard drilldown failed")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/delta/status_drilldown')
+def delta_status_drilldown():
+    """EC/ZEUS 状态分布饼块下钻: 返回某阶段 + 某状态下的实体级明细。"""
+    try:
+        stage = request.args.get('stage', '').strip()
+        kind = request.args.get('kind', '').strip()      # ec | zeus
+        status = request.args.get('status', '').strip()
+        search = request.args.get('search', '').strip()
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 1000))
+        if not stage or kind not in ('ec', 'zeus') or not status:
+            return jsonify({'success': False,
+                            'error': 'stage, kind(ec|zeus), status required'}), 400
+        result = db_manager.get_status_drilldown(
+            stage, kind, status, search=search, page=page, page_size=page_size)
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        logger.exception("delta status_drilldown failed")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1642,8 +1850,7 @@ def compare_records():
         result = db_manager.compare_records(field, value1, value2)
         return jsonify({'success': True, 'data': result})
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("compare failed")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1691,8 +1898,7 @@ def get_delta():
         cache_set(cache_key, response_data, ttl=300)
         return jsonify(response_data)
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("delta failed")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1710,8 +1916,7 @@ def get_delta_detail():
             return jsonify({'success': False, 'error': result['error']}), 404
         return jsonify({'success': True, 'data': result})
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("delta_detail failed")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1780,8 +1985,7 @@ def agent_suggestions():
             'suggestions_de': de[:6],
         })
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("agent suggestions failed")
         return jsonify({
             'success': False,
             'suggestions_zh': ['列出所有可用零件', '查找有EC号的零件', '查找SOMA为ja的零件',
@@ -1813,8 +2017,7 @@ def search_complex():
             'data': results
         })
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("search_complex failed")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -2160,8 +2363,7 @@ def monitoring_users():
             'active_users': len(inflight_by_ip),
         })
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("monitoring users failed")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -2306,34 +2508,71 @@ if __name__ == '__main__':
     cache_status = 'enabled (Redis)' if (_cache_enabled and _redis_client is not None) else 'disabled (no cache)'
     delta_status = 'enabled' if DELTA_REFRESH_INTERVAL and DELTA_REFRESH_INTERVAL > 0 else 'disabled'
     frontend_ok = os.path.isdir(FRONTEND_DIR)
-    print("=" * 68)
-    print("  van.ea Vehicle Part Smart Search")
-    print(f"  |- Version:       {APP_VERSION}")
-    print(f"  |- Listen:        {FLASK_HOST}:{FLASK_PORT}")
-    print(f"  |- Database:      {DB_TYPE}")
-    print(f"  |- Cache:         {cache_status}")
-    print(f"  |- Session:       {SESSION_TYPE}")
-    print(f"  |- Delta precomp: {delta_status} (interval {DELTA_REFRESH_INTERVAL}s)")
-    print(f"  |- Metrics:       {'/metrics' if _metrics else 'disabled'}")
-    print(f"  |- LeaderElec:    {'enabled' if _leader_elector else 'disabled'}", end="")
     if _leader_elector:
-        print(f"  is_leader={bool(_leader_elector.is_leader)} redis={_leader_elector._redis is not None}")
+        leader_line = f"enabled (is_leader={bool(_leader_elector.is_leader)}, redis={_leader_elector._redis is not None})"
     else:
-        print()
+        leader_line = "disabled"
     if _ollama_lb:
-        lb_nodes = _ollama_lb.get_all_nodes_status()
-        lb_healthy = sum(1 for n in lb_nodes if n.get('healthy'))
-        print(f"  |- Ollama LB:     {lb_healthy}/{len(lb_nodes)} nodes healthy")
+        _lb_nodes = _ollama_lb.get_all_nodes_status()
+        ollama_line = f"{sum(1 for n in _lb_nodes if n.get('healthy'))}/{len(_lb_nodes)} nodes healthy"
     else:
-        print(f"  |- Ollama LB:     disabled")
-    print(f"  |- Frontend dir:  {FRONTEND_DIR}  exists={frontend_ok}")
-    print(f"  |- Query:         http://localhost:{FLASK_PORT}/")
-    print(f"  |- Admin:         http://localhost:{FLASK_PORT}/admin")
-    print(f"  |- Health:        http://localhost:{FLASK_PORT}/api/health")
-    if _metrics:
-        print(f"  +- Metrics:       http://localhost:{FLASK_PORT}/metrics")
-    print("  (admin password not shown here; set via env var ADMIN_PASSWORD)")
-    print("=" * 68)
+        ollama_line = "disabled"
+    # 启动信息只写日志文件 (控制台保持安静; 有错误才在控制台输出)
+    logger.info(
+        "van.ea Vehicle Part Smart Search starting | v%s | %s:%s | db=%s | cache=%s | "
+        "session=%s | delta=%s (%ss) | metrics=%s | leader=%s | ollama_lb=%s | frontend_exists=%s | "
+        "query=http://localhost:%s/ admin=/admin (set ADMIN_PASSWORD via env)",
+        APP_VERSION, FLASK_HOST, FLASK_PORT, DB_TYPE, cache_status, SESSION_TYPE,
+        delta_status, DELTA_REFRESH_INTERVAL, ('/metrics' if _metrics else 'disabled'),
+        leader_line, ollama_line, frontend_ok, FLASK_PORT)
     # 本地/原生运行: Flask 内置服务器 (threaded 提升并发);
     # Docker 生产环境通过 Dockerfile 使用 gunicorn 多进程运行。
-    app.run(host=FLASK_HOST, port=FLASK_PORT, debug=False, threaded=True)
+    #
+    # 交互终端 (直接 python app.py): 后台线程起服务, 主线程运行彩色控制台
+    # (启动横幅 / 访问地址 / 依赖状态 / 重启·停止·刷新菜单);
+    # 非交互环境 (重定向、守护进程、gunicorn): 退化为普通阻塞运行。
+    if _sys.stdin and _sys.stdin.isatty() and _sys.stdout.isatty():
+        import config as _console_config
+        import console_ui
+        from werkzeug.serving import make_server
+
+        # 由"重启服务"派生的新进程: 等待旧进程释放端口后再监听
+        if os.environ.get('VANEA_RESTART') == '1':
+            time.sleep(1.5)
+        httpd = make_server(FLASK_HOST, FLASK_PORT, app, threaded=True)
+        server_thread = threading.Thread(target=httpd.serve_forever, name='flask-server', daemon=True)
+        server_thread.start()
+        # 给监听 socket 一点就绪时间, 保证控制台首次自探测成功
+        time.sleep(0.6)
+
+        app_objects = {
+            'db_manager': db_manager,
+            'redis_client': _redis_client,
+            'cache_enabled': _cache_enabled,
+            'ollama_lb': _ollama_lb,
+            'session_type': SESSION_TYPE,
+        }
+        try:
+            action = console_ui.run_console(
+                httpd, _console_config, FLASK_PORT,
+                app_objects=app_objects)
+        except KeyboardInterrupt:
+            action = 'stop'
+
+        if action in ('stop', 'restart'):
+            try:
+                httpd.shutdown()
+            except Exception:
+                pass
+            # 强制结束, 确保 dashboard 预计算等后台线程一并退出
+            os._exit(0)
+        else:
+            # 退出菜单: 服务继续后台运行, 主线程保活
+            try:
+                while True:
+                    time.sleep(3600)
+            except KeyboardInterrupt:
+                httpd.shutdown()
+                os._exit(0)
+    else:
+        app.run(host=FLASK_HOST, port=FLASK_PORT, debug=False, threaded=True)

@@ -325,11 +325,12 @@ def test_dashboard_stage_stats(full_db):
 
 
 def test_dashboard_bar_line_stages(full_db):
-    """bar_line 应包含三阶段 EC/FAV 计数"""
+    """bar_line 应包含全部阶段 (pre-TO→TO3) EC/FAV 计数; 本夹具未导 TO3, 其计数为 0"""
     data = full_db.get_delta_dashboard_data()
-    assert data["bar_line"]["stages"] == ["pre-TO", "TO1", "TO2"]
-    assert data["bar_line"]["ec_counts"] == [3, 3, 3]
-    assert data["bar_line"]["fav_counts"] == [2, 2, 2]
+    assert data["bar_line"]["stages"] == ["pre-TO", "TO1", "TO2", "TO3"]
+    # PN004 在 ENIGMA 有两个 EC 值 (EC-4 + EC-4B), TO1/TO2 各计 4 (与 test_dashboard_stage_stats 口径一致)
+    assert data["bar_line"]["ec_counts"] == [3, 4, 4, 0]
+    assert data["bar_line"]["fav_counts"] == [2, 2, 2, 0]
 
 
 def test_dashboard_status_pies(full_db):

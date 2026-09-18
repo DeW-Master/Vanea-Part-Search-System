@@ -18,6 +18,9 @@ import urllib.error
 
 from database import db_manager, get_db
 from config import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_REQUEST_TIMEOUT
+from log_config import get_logger
+
+logger = get_logger("agent")
 
 # ============ Phase 3: Ollama 负载均衡器 (懒加载，失败回退直连 OLLAMA_URL) ============
 _lb_cache = [None]
@@ -30,8 +33,9 @@ def _get_lb():
         from ollama_lb import get_ollama_lb
         _lb_cache[0] = get_ollama_lb()
         return _lb_cache[0]
-    except Exception as e:
-        print(f"[Agent] Ollama LB unavailable, falling back to direct {OLLAMA_URL}: {e}")
+    except Exception:
+        logger.warning("Ollama LB unavailable, falling back to direct %s",
+                       OLLAMA_URL, exc_info=True)
         _lb_cache[0] = False
         return None
 
@@ -47,8 +51,8 @@ def _get_engine_manager():
         from llm_engine import get_engine_manager
         _em_cache[0] = get_engine_manager()
         return _em_cache[0]
-    except Exception as e:
-        print(f"[Agent] LLM engine manager unavailable: {e}")
+    except Exception:
+        logger.warning("LLM engine manager unavailable", exc_info=True)
         _em_cache[0] = False
         return None
 
@@ -77,6 +81,13 @@ class EngineChatAdapter:
             raise RuntimeError("LLM 引擎管理器不可用")
         return self.em.chat(messages, system_prompt=system_prompt,
                             temperature=temperature, stage=stage)
+
+    def chat_stream(self, messages, system_prompt=None, temperature=0.3,
+                    stage=None):
+        if self.em is None:
+            raise RuntimeError("LLM 引擎管理器不可用")
+        return self.em.chat_stream(messages, system_prompt=system_prompt,
+                                   temperature=temperature, stage=stage)
 
 
 # ============ 配置 ============
@@ -138,8 +149,8 @@ def _load_cloud_config():
             with open(CLOUD_CONFIG_PATH, 'r', encoding='utf-8') as f:
                 saved = json.load(f)
                 _cloud_config.update(saved)
-    except Exception as e:
-        print(f"[Agent] Failed to load cloud config: {e}")
+    except Exception:
+        logger.warning("Failed to load cloud config", exc_info=True)
 
 
 def _save_cloud_config():
@@ -148,8 +159,8 @@ def _save_cloud_config():
         os.makedirs(os.path.dirname(CLOUD_CONFIG_PATH), exist_ok=True)
         with open(CLOUD_CONFIG_PATH, 'w', encoding='utf-8') as f:
             json.dump(_cloud_config, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"[Agent] Failed to save cloud config: {e}")
+    except Exception:
+        logger.warning("Failed to save cloud config", exc_info=True)
 
 
 # 启动时加载云端配置
@@ -258,8 +269,8 @@ def get_available_models():
                 'is_current': m.get('name') == _current_model,
             })
         return models
-    except Exception as e:
-        print(f"[Agent] Failed to get models: {e}")
+    except Exception:
+        logger.warning("Failed to get models", exc_info=True)
         return []
 
 
@@ -383,7 +394,8 @@ def delete_model(model_name):
                         if 200 <= r.status < 300:
                             ok_count += 1
                 except Exception as ee:
-                    print(f"[Agent] Delete model {model_name} on {n['url']} failed: {ee}")
+                    logger.warning("Delete model %s on %s failed: %s",
+                                   model_name, n['url'], ee, exc_info=True)
             return ok_count >= 1
         # 回退: 单节点直连
         total_attempt = 1
@@ -396,7 +408,8 @@ def delete_model(model_name):
         with urllib.request.urlopen(req, timeout=10) as resp:
             return True
     except Exception as e:
-        print(f"[Agent] Failed to delete model {model_name}: {e} (ok={ok_count}/{total_attempt})")
+        logger.warning("Failed to delete model %s: %s (ok=%s/%s)",
+                       model_name, e, ok_count, total_attempt, exc_info=True)
         return ok_count >= 1
 
 
@@ -893,8 +906,8 @@ def _load_file_stage_map():
             "WHERE stage IS NOT NULL AND stage <> ''"
         ).fetchall()
         return {r['id']: r['stage'] for r in rows}
-    except Exception as e:
-        print(f"[Agent] _load_file_stage_map failed: {e}")
+    except Exception:
+        logger.warning("_load_file_stage_map failed", exc_info=True)
         return {}
     finally:
         if conn is not None:
@@ -1019,8 +1032,8 @@ def backfill_row_stages(results, columns):
                 pn_map.setdefault(pn, []).append(rec)
             if nm:
                 nm_map.setdefault(nm, []).append(rec)
-    except Exception as e:
-        print(f"[Agent] backfill_row_stages query failed: {e}")
+    except Exception:
+        logger.warning("backfill_row_stages query failed", exc_info=True)
         return 0
     finally:
         if conn is not None:
@@ -1072,8 +1085,8 @@ def format_rowwise_summary(rows, lang='zh', columns=None):
     # 确定性补全：缺阶段标签的维度行，用零件号/零件名反查文件阶段
     try:
         backfill_row_stages(rows, columns or [])
-    except Exception as e:
-        print(f"[Agent] backfill_row_stages skipped: {e}")
+    except Exception:
+        logger.warning("backfill_row_stages skipped", exc_info=True)
     labels = _ROWISE_LABELS.get(lang, _ROWISE_LABELS['en'])
     file_stage = None
     lines = []
@@ -1138,8 +1151,8 @@ class OllamaAgent:
                 else:
                     self.model = installed[0]
                 return True
-        except Exception as e:
-            print(f"[Agent] Ollama unavailable: {e}")
+        except Exception:
+            logger.warning("Ollama unavailable", exc_info=True)
             return False
         return False
 
@@ -1182,6 +1195,68 @@ class OllamaAgent:
         with urllib.request.urlopen(req, timeout=90) as resp:
             data = json.loads(resp.read())
             return (data.get('message') or {}).get('content', '')
+
+    def chat_stream(self, messages, system_prompt=None, temperature=0.3,
+                    stage=None):
+        """流式多轮对话, 开启思考。逐段 yield ('thinking'|'answer', delta)。
+
+        Ollama /api/chat stream=true 返回 NDJSON, 每行 message.thinking /
+        message.content 为增量; think=true 显式开启推理 (兼容模型)。
+        LB 路径复用 request_stream (仅建连阶段重试)。
+        """
+        payload = {"model": self.model, "stream": True, "think": True,
+                   "options": {"temperature": temperature}}
+        msgs = list(messages or [])
+        if system_prompt:
+            msgs.insert(0, {"role": "system", "content": system_prompt})
+        payload["messages"] = msgs
+
+        lb = _get_lb()
+        if lb:
+            line_iter = lb.request_stream('/api/chat', payload, method='POST',
+                                          timeout=180, max_retries=2)
+        else:
+            req = urllib.request.Request(
+                f"{OLLAMA_URL}/api/chat",
+                data=json.dumps(payload).encode('utf-8'),
+                headers={'Content-Type': 'application/json'}, method='POST'
+            )
+            resp = urllib.request.urlopen(req, timeout=180)
+            line_iter = resp
+
+        yielded = False
+        try:
+            for raw_line in line_iter:
+                if not raw_line:
+                    continue
+                line = raw_line.decode('utf-8', 'ignore').strip() \
+                    if isinstance(raw_line, (bytes, bytearray)) else raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except Exception:
+                    continue
+                msg = chunk.get('message') or {}
+                thinking = msg.get('thinking')
+                if thinking:
+                    yielded = True
+                    yield 'thinking', thinking
+                content = msg.get('content')
+                if content:
+                    yielded = True
+                    yield 'answer', content
+                if chunk.get('done'):
+                    break
+        finally:
+            # 直连路径需要关闭响应; LB 生成器内部自行关闭 resp
+            if not lb:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+        if not yielded:
+            raise RuntimeError("Ollama 流式返回为空")
 
     def analyze_intent(self, user_query):
         lang = get_language()
@@ -1542,6 +1617,61 @@ class CloudAgent:
             data = json.loads(resp.read())
             return data['choices'][0]['message']['content']
 
+    def chat_stream(self, messages, system_prompt=None, temperature=0.3,
+                    stage=None):
+        """流式多轮对话 (OpenAI 兼容 SSE)。逐段 yield ('thinking'|'answer', delta);
+        云端支持时透传 reasoning_content 作为思考增量。"""
+        api_url = _cloud_config.get('api_url', '').rstrip('/')
+        api_key = _cloud_config.get('api_key', '')
+        model = _cloud_config.get('model', '')
+        if not api_url or not api_key or not model:
+            raise Exception("Cloud API not configured")
+        url = f"{api_url}/chat/completions"
+        msgs = list(messages or [])
+        if system_prompt:
+            msgs.insert(0, {"role": "system", "content": system_prompt})
+        payload = json.dumps({
+            "model": model,
+            "messages": msgs,
+            "temperature": temperature,
+            "stream": True,
+        }).encode('utf-8')
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={'Content-Type': 'application/json',
+                     'Authorization': f'Bearer {api_key}'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            yielded = False
+            for raw_line in resp:
+                if not raw_line:
+                    continue
+                line = raw_line.decode('utf-8', 'ignore').strip()
+                if not line.startswith('data:'):
+                    continue
+                data_str = line[5:].strip()
+                if data_str == '[DONE]':
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                except Exception:
+                    continue
+                choices = chunk.get('choices') or []
+                if not choices:
+                    continue
+                delta = choices[0].get('delta') or {}
+                reasoning = delta.get('reasoning_content')
+                if reasoning:
+                    yielded = True
+                    yield 'thinking', reasoning
+                content = delta.get('content')
+                if content:
+                    yielded = True
+                    yield 'answer', content
+            if not yielded:
+                raise RuntimeError("云端流式返回为空")
+
     def analyze_intent(self, user_query):
         lang = get_language()
         if lang == 'en':
@@ -1611,7 +1741,8 @@ class AgentManager:
         self.rule_agent = RuleBasedAgent()
         self.engine_agent = EngineChatAdapter()
         self.use_ollama = self.ollama_agent.available
-        print(f"[Agent] Mode: {'Ollama' if self.use_ollama else 'Rule-based'} | Backend: {_compute_backend}")
+        logger.info("Mode: %s | Backend: %s",
+                    'Ollama' if self.use_ollama else 'Rule-based', _compute_backend)
 
     def reload_ollama(self):
         self.ollama_agent = OllamaAgent()
@@ -1636,7 +1767,12 @@ class AgentManager:
             if em is not None:
                 # 双引擎: 只要有一个引擎健康即可服务
                 if em.is_healthy('vllm') or em.is_healthy('ollama'):
-                    return self.engine_agent, em.active
+                    # mode 返回实际承载流量的引擎名, 而非盲目用 active:
+                    # active 初始等于首选 (可能尚未故障转移), 会导致前端误显示
+                    active = em.active
+                    if not em.is_healthy(active):
+                        active = 'ollama' if em.is_healthy('ollama') else 'vllm'
+                    return self.engine_agent, active
             # 引擎管理器不可用时回退旧 Ollama 直连路径
             if self.use_ollama:
                 return self.ollama_agent, 'ollama'
@@ -1708,11 +1844,332 @@ class AgentManager:
                 if result is not None:
                     result['mode'] = mode
                     return result
-            except Exception as e:
-                print(f"[Agent] NL2SQL failed, fallback to rule: {e}")
+            except Exception:
+                logger.warning("NL2SQL failed, fallback to rule", exc_info=True)
 
         # 4. 回退: 规则模式（无 LLM 或 NL2SQL 异常时使用）
         return self._rule_search(user_query)
+
+    # ---------- SSE 流式问答 (思考过程实时透传) ----------
+
+    def process_query_stream(self, user_query, lang='zh', history=None,
+                             session_id=None, ip=None):
+        """流式处理用户查询的生成器包装: 设置语言/请求追踪并保证清理。
+
+        逐段 yield 事件 dict:
+          {'type':'stage','stage':str}                 阶段提示
+          {'type':'thinking','delta':str}              思考增量
+          {'type':'answer','delta':str}                正文增量
+          {'type':'result', ...response,search_results,is_compare,...}  最终结果
+          {'type':'error','message':str}               错误
+        """
+        set_language(lang)
+        history = history or []
+        trace_set = False
+        try:
+            from llm_engine import set_request_trace
+            set_request_trace(session_id=session_id, query=user_query, ip=ip)
+            trace_set = True
+        except Exception:
+            pass
+        try:
+            yield from self._process_query_stream_inner(user_query, history)
+        finally:
+            if trace_set:
+                try:
+                    from llm_engine import set_request_trace as _clear
+                    _clear(None)
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _stream_stage_label(key):
+        lang = get_language()
+        labels = {
+            'en': {'intent': 'Analyzing your question…',
+                   'sql': 'Generating query…',
+                   'execute': 'Querying the database…',
+                   'answer': 'Composing the answer…'},
+            'de': {'intent': 'Frage wird analysiert…',
+                   'sql': 'Abfrage wird erstellt…',
+                   'execute': 'Datenbank wird abgefragt…',
+                   'answer': 'Antwort wird formuliert…'},
+            'zh': {'intent': '正在分析问题…',
+                   'sql': '正在生成查询…',
+                   'execute': '正在查询数据库…',
+                   'answer': '正在组织回答…'},
+        }
+        return labels.get(lang, labels['zh']).get(key, key)
+
+    def _agent_chat_stream(self, active_agent, messages, system_prompt,
+                           temperature, stage):
+        """统一取 active_agent 的流; 不支持流式的智能体退化为一次性返回。
+
+        返回生成器, yield (kind, delta)。
+        """
+        fn = getattr(active_agent, 'chat_stream', None)
+        if fn is not None:
+            return fn(messages, system_prompt=system_prompt,
+                      temperature=temperature, stage=stage)
+
+        def _fallback():
+            try:
+                content = active_agent.chat(
+                    messages, system_prompt=system_prompt,
+                    temperature=temperature, stage=stage)
+                if content:
+                    yield 'answer', content
+            except Exception:
+                raise
+        return _fallback()
+
+    def _process_query_stream_inner(self, user_query, history):
+        """流式主逻辑生成器 (请求追踪已由外层设置)。"""
+        # 1. 对比意图: 专用 UI, 无 LLM 思考, 直接出结果
+        compare_intent = detect_compare_intent(user_query)
+        if compare_intent:
+            yield {'type': 'stage', 'stage': self._stream_stage_label('execute')}
+            result = self._handle_compare(user_query, compare_intent)
+            yield {'type': 'result',
+                   'response': result.get('response', ''),
+                   'intent': result.get('intent'),
+                   'mode': result.get('mode'),
+                   'search_results': None,
+                   'is_table_related': True,
+                   'is_compare': True,
+                   'compare_result': result.get('compare_result')}
+            return
+
+        # 2. 获取活跃智能体
+        active_agent, mode = self.get_active_agent()
+
+        # 3. LLM 路径走流式 NL2SQL
+        if mode in ('ollama', 'cloud', 'vllm'):
+            try:
+                yield from self._nl2sql_search_stream(
+                    active_agent, user_query, history, mode)
+                return
+            except Exception:
+                logger.warning("NL2SQL stream failed, fallback to rule",
+                               exc_info=True)
+
+        # 4. 规则兜底 (无 LLM 思考过程)
+        result = self._rule_search(user_query)
+        yield {'type': 'result',
+               'response': result.get('response', ''),
+               'intent': result.get('intent'),
+               'mode': 'rule',
+               'search_results': result.get('search_results'),
+               'is_table_related': bool(
+                   (result.get('intent') or {}).get('is_table_related')),
+               'is_compare': False}
+
+    def _nl2sql_search_stream(self, active_agent, user_query, history, mode):
+        """NL2SQL 流式版: 思考过程实时透传, 最终 yield result 事件。"""
+        schema = db_manager.get_schema_description()
+        system_prompt = self._nl2sql_system_prompt(schema)
+
+        messages = []
+        for msg in history[-12:]:
+            role = msg.get('role')
+            if role not in ('user', 'assistant', 'agent'):
+                continue
+            content = (msg.get('content') or '').strip()
+            if not content:
+                continue
+            messages.append({'role': 'assistant' if role == 'agent' else role,
+                             'content': content[:1500]})
+        messages.append({'role': 'user', 'content': user_query})
+
+        # ---- 阶段 1: SQL 生成 (思考流实时透传, 正文累积为 JSON) ----
+        yield {'type': 'stage', 'stage': self._stream_stage_label('sql')}
+        answer_buf = []
+        stream_ok = False
+        try:
+            stream = self._agent_chat_stream(
+                active_agent, messages, system_prompt, 0.1, 'SQL 生成(流式)')
+            for kind, delta in stream:
+                if kind == 'thinking':
+                    yield {'type': 'thinking', 'delta': delta}
+                elif kind == 'answer':
+                    stream_ok = True
+                    answer_buf.append(delta)
+        except Exception:
+            # 流式连接失败且尚无正文: 退化为非流式再试一次
+            if stream_ok:
+                raise
+            logger.warning("stream chat failed before first token, "
+                           "fallback to non-stream", exc_info=True)
+            raw = active_agent.chat(messages, system_prompt=system_prompt,
+                                    temperature=0.1, stage='SQL 生成')
+            answer_buf = [raw or '']
+
+        raw = ''.join(answer_buf)
+        plan = self._extract_json(raw)
+        if not isinstance(plan, dict):
+            logger.warning("NL2SQL stream JSON parse failed: %s", raw[:300])
+            # 交回上层走 rule 兜底
+            raise RuntimeError("NL2SQL plan parse failed")
+
+        is_data_query = plan.get('is_data_query')
+        sql = (plan.get('sql') or '').strip()
+        sql_type = plan.get('sql_type') or ('aggregate'
+                                            if re.search(r'\b(COUNT|SUM|AVG|MIN|MAX|GROUP\s+BY)\b',
+                                                         sql, re.IGNORECASE)
+                                            else 'rows')
+
+        # 闲聊: reason 即回答, 作为正文一次性给出
+        if not is_data_query or not sql:
+            reason = plan.get('reason') or ''
+            if not reason:
+                reason = self.rule_agent.generate_response(
+                    user_query, None, {'is_table_related': False})
+            yield {'type': 'answer', 'delta': reason}
+            yield {'type': 'result',
+                   'response': reason,
+                   'intent': {'is_table_related': False,
+                              'question_type': 'chat',
+                              'nl2sql_plan': plan},
+                   'mode': mode,
+                   'search_results': None,
+                   'is_table_related': False,
+                   'is_compare': False}
+            return
+
+        # ---- 阶段 2: 执行 SQL (失败按既有逻辑带列名提示非流式重试一次) ----
+        yield {'type': 'stage', 'stage': self._stream_stage_label('execute')}
+        results, columns, err = db_manager.execute_readonly_sql(sql)
+        if err:
+            logger.warning("SQL execution failed (stream attempt 1): %s | SQL=%s",
+                           err, sql)
+            retry_msgs = list(messages) + [
+                {'role': 'assistant', 'content': json.dumps(plan, ensure_ascii=False)},
+                {'role': 'user', 'content': (
+                    f"The SQL failed with this database error: {err}\n"
+                    f"Your SQL was: {sql}\n"
+                    "Please fix the SQL. Remember: parts_data only has columns "
+                    "id, part_number, file_id, row_number, data (JSON). Stage/Baulos "
+                    "values live in json_extract(data, '$.\"Build Lot Aggregate\"'); "
+                    "part name is json_extract(data, '$.\"Name\"'); EC/bundle is "
+                    "json_extract(data, '$.\"Bundle Number\"'); file stage "
+                    "labels are in uploaded_files.stage (JOIN on file_id). "
+                    "Output the same strict JSON format again with the corrected SQL.")},
+            ]
+            raw2 = active_agent.chat(retry_msgs, system_prompt=system_prompt,
+                                     temperature=0.0, stage='SQL 修正')
+            plan2 = self._extract_json(raw2)
+            sql2 = (plan2 or {}).get('sql', '').strip() if isinstance(plan2, dict) else ''
+            if sql2 and sql2 != sql:
+                results, columns, err = db_manager.execute_readonly_sql(sql2)
+                if not err:
+                    sql, plan = sql2, plan2
+                    logger.info("SQL retry (stream) succeeded")
+        if err:
+            logger.warning("SQL execution failed after retry (stream): %s", err)
+            raise RuntimeError("SQL execution failed after retry")
+
+        # ---- 阶段 3: 生成回答 (事件生成器: 思考/正文实时下发) ----
+        yield {'type': 'stage', 'stage': self._stream_stage_label('answer')}
+        answer_parts = []
+        for ev in self._generate_answer_stream(
+                active_agent, user_query, messages, sql, sql_type,
+                results, columns):
+            if ev.get('type') == 'answer':
+                answer_parts.append(ev.get('delta') or '')
+            yield ev
+        answer_text = ''.join(answer_parts)
+
+        intent = {
+            'is_table_related': True,
+            'question_type': sql_type,
+            'sql': sql,
+            'nl2sql_plan': plan,
+        }
+        yield {'type': 'result',
+               'response': answer_text,
+               'intent': intent,
+               'mode': mode,
+               'search_results': results,
+               'is_table_related': True,
+               'is_compare': False}
+
+    def _generate_answer_stream(self, active_agent, user_query, history_messages,
+                                sql, sql_type, results, columns):
+        """流式答案合成事件生成器, 逐段 yield SSE 事件:
+
+        明细类 (rows) 沿用确定性提炼摘要 (无 LLM 思考, 一次性 answer 事件);
+        聚合统计类流式调用 LLM, thinking/answer 增量实时下发;
+        流式失败或为空时回退确定性答案。
+        """
+        lang = get_language()
+
+        # 空结果: 确定性文案
+        if not results:
+            if sql_type != 'aggregate':
+                if lang == 'en':
+                    yield {'type': 'answer', 'delta': "No matching records found."}
+                elif lang == 'de':
+                    yield {'type': 'answer', 'delta': "Keine übereinstimmenden Datensätze gefunden."}
+                else:
+                    yield {'type': 'answer', 'delta': "未找到匹配的记录。"}
+                return
+
+        # 明细类: 确定性提炼摘要 (与非流式路径完全一致)
+        if sql_type != 'aggregate':
+            col_std = [_rowwise_std_key(c) for c in (columns or [])]
+            if 'part_number' in col_std or any(
+                    ('part_number' in row or 'Part Number' in row)
+                    for row in (results or [])[:5]):
+                summary = format_consolidated_summary(
+                    results, max_groups=10, lang=lang)
+            else:
+                summary = format_rowwise_summary(results, lang=lang,
+                                                 columns=columns)
+            if summary:
+                if lang == 'en':
+                    lead = ("Here is the refined summary (duplicates merged, "
+                            "multi-stage cells split):")
+                elif lang == 'de':
+                    lead = ("Hier ist die zusammengefasste Übersicht "
+                            "(Duplikate zusammengefasst, Mehrfach-Stufen aufgeteilt):")
+                else:
+                    lead = "以下为提炼结果（已合并重复、拆分多阶段）："
+                yield {'type': 'answer', 'delta': f"{lead}\n{summary}"}
+                return
+
+        # 聚合统计类 (或明细摘要为空): 流式 LLM 组织语言
+        summary_lines = []
+        for row in results[:20]:
+            summary_lines.append(' | '.join(f"{k}={v}" for k, v in row.items()))
+        data_summary = '\n'.join(summary_lines) if summary_lines else '(no rows)'
+
+        answer_sys = self._answer_system_prompt(sql_type, rowwise=False)
+        answer_messages = list(history_messages[:-1])
+        prompt = (
+            f"User question: {user_query}\n\n"
+            f"Executed SQL: {sql}\n\n"
+            f"Query result:\n{data_summary}\n\n"
+            f"Please answer in {get_language()}."
+        )
+        answer_messages.append({'role': 'user', 'content': prompt})
+
+        buf = []
+        try:
+            stream = self._agent_chat_stream(
+                active_agent, answer_messages, answer_sys, 0.4, '答案合成(流式)')
+            for kind, delta in stream:
+                if kind == 'thinking':
+                    yield {'type': 'thinking', 'delta': delta}
+                elif kind == 'answer':
+                    buf.append(delta)
+                    yield {'type': 'answer', 'delta': delta}
+        except Exception:
+            logger.warning("stream answer generation failed", exc_info=True)
+
+        if not ''.join(buf).strip():
+            fallback = self._fallback_answer(user_query, sql_type, results)
+            if fallback:
+                yield {'type': 'answer', 'delta': fallback}
 
     def _rule_search(self, user_query):
         """规则模式兜底：基于关键词/正则的搜索。"""
@@ -1759,9 +2216,14 @@ class AgentManager:
                 "The stage label per uploaded file is in uploaded_files.stage "
                 "(JOIN uploaded_files uf ON uf.id = parts_data.file_id).\n"
                 "9. The same part number may appear in multiple rows (one per stage/file). "
-                "For detail queries about a part, use SELECT DISTINCT or GROUP BY to avoid "
-                "duplicate rows; when listing part attributes, group by part_number and use "
-                "json_each/group_concat as needed, rather than returning repeated identical rows.\n"
+                "For ANY detail/listing query (sql_type='rows'), the outermost SELECT MUST "
+                "project the full columns `id, part_number, data` from parts_data (use "
+                "aliases pd.id AS id, pd.part_number AS part_number, pd.data AS data when "
+                "joining), so the application can expand all business fields. NEVER return "
+                "only part_number or only json_extract columns for detail queries; dedup is "
+                "handled downstream. SELECT DISTINCT/GROUP BY are only for pure aggregate "
+                "stats (sql_type='aggregate'); if you must aggregate, return the numbers, "
+                "not a narrow part list.\n"
                 "10. For questions about stages / phase progression / ZGS version changes, "
                 "you MUST JOIN uploaded_files uf ON uf.id = parts_data.file_id and COALESCE the "
                 "two stage sources so the stage is never blank: e.g. "
@@ -1796,9 +2258,13 @@ class AgentManager:
                 "Die Phasenbezeichnung pro Datei steht in uploaded_files.stage "
                 "(JOIN uploaded_files uf ON uf.id = parts_data.file_id).\n"
                 "9. Dieselbe Teilenummer kann in mehreren Zeilen vorkommen (pro Phase/Datei). "
-                "Verwenden Sie bei Detailabfragen SELECT DISTINCT oder GROUP BY, um doppelte "
-                "Zeilen zu vermeiden; gruppieren Sie Attribute nach Teilenummer statt "
-                "wiederholte identische Zeilen zurückzugeben.\n"
+                "Bei JEDE Detail-/Listenabfrage (sql_type='rows') MUSS das äußere SELECT die "
+                "vollen Spalten `id, part_number, data` aus parts_data projizieren (bei "
+                "JOINs als pd.id AS id, pd.part_number AS part_number, pd.data AS data), "
+                "damit die Anwendung alle Geschäftsfelder aufklappen kann. Geben Sie bei "
+                "Detailabfragen NIE nur part_number oder nur json_extract-Spalten zurück; "
+                "Duplikate werden nachfolgend entfernt. SELECT DISTINCT/GROUP BY nur für "
+                "reine Statistik (sql_type='aggregate').\n"
                 "10. Bei Fragen zu Phasen / Phasenfortschritt / ZGS-Versionsänderungen MÜSSEN "
                 "Sie uploaded_files uf ON uf.id = parts_data.file_id JOINEN und die beiden "
                 "Phasenquellen mit COALESCE zusammenführen, damit die Phase nie leer ist: z.B. "
@@ -1826,9 +2292,13 @@ class AgentManager:
             "分隔多个阶段，例如 'AG1_TO2_Fuz | AG1_TO3_Fuz'）；零件名是 JSON 键 'Name'，"
             "EC/Bundle 是 'Bundle Number'，KEM 是 'KEM Number'；每个文件的阶段标签在 "
             "uploaded_files.stage（JOIN uploaded_files uf ON uf.id = parts_data.file_id）。\n"
-            "9. 同一零件号可能在多个阶段/文件中出现多行。明细查询请用 SELECT DISTINCT 或 "
-            "GROUP BY 去重；查询零件属性时按零件号分组（可用 group_concat 合并 ZGS/阶段/EC "
-            "等取值），不要返回重复的相同行。\n"
+            "9. 同一零件号可能在多个阶段/文件中出现多行。任何明细/列表类查询"
+            "（sql_type='rows'），最外层 SELECT 必须投影 parts_data 的完整三列 "
+            "`id, part_number, data`（JOIN 时写成 pd.id AS id, pd.part_number AS "
+            "part_number, pd.data AS data），以便系统展开全部业务字段；严禁明细查询只返回 "
+            "part_number 或只返回若干 json_extract 列，去重由下游统一处理。SELECT "
+            "DISTINCT/GROUP BY 仅用于纯统计（sql_type='aggregate'），统计时返回数值，"
+            "不要返回窄的件号清单。\n"
             "10. 凡是询问阶段/各阶段进展/ZGS 版本变化的问题，必须 JOIN uploaded_files uf ON "
             "uf.id = parts_data.file_id，并用 COALESCE 把两个阶段来源合并，保证阶段不为空，例如："
             "COALESCE(NULLIF(json_extract(pd.data,'$.\"Build Lot Aggregate\"'),''), uf.stage) AS stage。"
@@ -1940,7 +2410,7 @@ class AgentManager:
                                 stage='SQL 生成')
         plan = self._extract_json(raw)
         if not isinstance(plan, dict):
-            print(f"[Agent] NL2SQL JSON parse failed: {raw[:300]}")
+            logger.warning("NL2SQL JSON parse failed: %s", raw[:300])
             return None
 
         is_data_query = plan.get('is_data_query')
@@ -1965,7 +2435,7 @@ class AgentManager:
         # 执行只读 SQL；失败时把报错反馈给 LLM 重试一次 (常见: 幻觉不存在的列)
         results, columns, err = db_manager.execute_readonly_sql(sql)
         if err:
-            print(f"[Agent] SQL execution failed (attempt 1): {err} | SQL={sql}")
+            logger.warning("SQL execution failed (attempt 1): %s | SQL=%s", err, sql)
             retry_msgs = list(messages) + [
                 {'role': 'assistant', 'content': json.dumps(plan, ensure_ascii=False)},
                 {'role': 'user', 'content': (
@@ -1987,9 +2457,9 @@ class AgentManager:
                 results, columns, err = db_manager.execute_readonly_sql(sql2)
                 if not err:
                     sql, plan = sql2, plan2
-                    print("[Agent] SQL retry succeeded")
+                    logger.info("SQL retry succeeded")
         if err:
-            print(f"[Agent] SQL execution failed after retry: {err}")
+            logger.warning("SQL execution failed after retry: %s", err)
             # 把错误信息回传，让上层走 rule 兜底
             return None
 
@@ -2066,8 +2536,8 @@ class AgentManager:
                                     stage='答案合成').strip()
             if ans:
                 return ans
-        except Exception as e:
-            print(f"[Agent] answer generation failed: {e}")
+        except Exception:
+            logger.warning("answer generation failed", exc_info=True)
 
         # 回退：本地拼一个简短回答
         return self._fallback_answer(user_query, sql_type, results)

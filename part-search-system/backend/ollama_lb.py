@@ -25,6 +25,9 @@ from config import (
     OLLAMA_FAILURE_THRESHOLD, OLLAMA_RECOVERY_BACKOFF,
     OLLAMA_MODEL, INSTANCE_ID,
 )
+from log_config import get_logger
+
+logger = get_logger("ollama_lb")
 
 
 class OllamaNode:
@@ -49,7 +52,7 @@ class OllamaNode:
     def mark_success(self):
         self.consecutive_failures = 0
         if not self.healthy:
-            print(f"[Ollama-LB] node recovered: {self.url}")
+            logger.info("node recovered: %s", self.url)
         self.healthy = True
 
     def mark_failure(self, threshold: int = OLLAMA_FAILURE_THRESHOLD):
@@ -59,9 +62,10 @@ class OllamaNode:
         if self.healthy and self.consecutive_failures >= threshold:
             self.healthy = False
             self.recovery_at = time.time() + OLLAMA_RECOVERY_BACKOFF
-            print(f"[Ollama-LB] node removed: {self.url} "
-                  f"(consecutive failures {self.consecutive_failures}, "
-                  f"recovery backoff: {OLLAMA_RECOVERY_BACKOFF}s)")
+            logger.warning("node removed: %s (consecutive failures %s, "
+                           "recovery backoff: %ss)",
+                           self.url, self.consecutive_failures,
+                           OLLAMA_RECOVERY_BACKOFF)
 
     def can_try_recover(self) -> bool:
         return (not self.healthy) and time.time() >= self.recovery_at
@@ -126,9 +130,9 @@ class OllamaLoadBalancer:
         # 启动健康检查
         self._start_health_checker()
 
-        print(f"[Ollama-LB] init: strategy={self._strategy}, nodes={len(self._nodes)}")
+        logger.info("init: strategy=%s, nodes=%s", self._strategy, len(self._nodes))
         for n in self._nodes:
-            print(f"[Ollama-LB]   - {n.url}")
+            logger.info("  - %s", n.url)
 
     # ============== 生命周期 ==============
     def _start_health_checker(self):
@@ -147,8 +151,8 @@ class OllamaLoadBalancer:
         while not self._stop_event.is_set():
             try:
                 self._check_all_nodes()
-            except Exception as e:
-                print(f"[Ollama-LB] health check error: {e}")
+            except Exception:
+                logger.warning("health check error", exc_info=True)
             self._stop_event.wait(OLLAMA_HEALTHCHECK_INTERVAL)
 
     def _check_all_nodes(self):
@@ -258,7 +262,9 @@ class OllamaLoadBalancer:
                 node.mark_failure()
                 self._fire_metric('ollama_request_total', node=node, success=False)
                 last_exc = e
-                print(f"[Ollama-LB] request {node.url}{path} failed (attempt {attempt+1}/{max_retries}): {e}")
+                logger.warning("request %s%s failed (attempt %s/%s): %s",
+                               node.url, path, attempt+1, max_retries, e,
+                               exc_info=True)
             finally:
                 node.active_requests = max(0, node.active_requests - 1)
 
@@ -319,8 +325,10 @@ class OllamaLoadBalancer:
                 self._fire_metric('ollama_request_total', node=node, success=False)
                 node.active_requests = max(0, node.active_requests - 1)
                 last_exc = e
-                print(f"[Ollama-LB] streaming request {node.url}{path} failed "
-                      f"(attempt {attempt+1}/{max_retries}): {e}")
+                logger.warning("streaming request %s%s failed "
+                               "(attempt %s/%s): %s",
+                               node.url, path, attempt+1, max_retries, e,
+                               exc_info=True)
                 # 非流式已建立才不重试，这里是建连阶段，可以继续重试
                 continue
 
@@ -338,7 +346,8 @@ class OllamaLoadBalancer:
             try:
                 cb(**kwargs)
             except Exception as e:
-                print(f"[Ollama-LB] metric callback error {name}: {e}")
+                logger.warning("metric callback error %s: %s", name, e,
+                               exc_info=True)
 
 
 # 全局单例

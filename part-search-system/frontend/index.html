@@ -592,6 +592,81 @@
       font-weight: 500;
     }
 
+    /* Streaming thinking box */
+    .thinking-box {
+      margin-bottom: 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg-alt);
+      overflow: hidden;
+      font-size: 12px;
+    }
+    .thinking-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      cursor: pointer;
+      user-select: none;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+    .thinking-header:hover { color: var(--text); }
+    .thinking-header .thinking-caret {
+      display: inline-block;
+      transition: transform 0.2s;
+      font-size: 10px;
+    }
+    .thinking-box.expanded .thinking-header .thinking-caret { transform: rotate(90deg); }
+    .thinking-header .thinking-stage {
+      margin-left: auto;
+      font-weight: 400;
+      font-size: 11px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .thinking-spinner {
+      width: 10px; height: 10px;
+      border: 2px solid var(--border-bright);
+      border-top-color: var(--info);
+      border-radius: 50%;
+      animation: thinkingSpin 0.7s linear infinite;
+    }
+    .thinking-box.done .thinking-spinner { display: none; }
+    @keyframes thinkingSpin { to { transform: rotate(360deg); } }
+    .thinking-body {
+      display: none;
+      max-height: 150px;
+      overflow-y: auto;
+      padding: 8px 10px;
+      border-top: 1px solid var(--border);
+      color: var(--text-secondary);
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .thinking-box.expanded .thinking-body { display: block; }
+    .thinking-body.thinking-pulse::after {
+      content: '▍';
+      animation: blink 1s steps(2, start) infinite;
+      color: var(--info);
+    }
+    @keyframes blink { to { visibility: hidden; } }
+    .stream-bubble.streaming::after {
+      content: '▍';
+      animation: blink 1s steps(2, start) infinite;
+      color: var(--info);
+    }
+    .chat-stage-hint {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
     /* Typing indicator */
     .typing-indicator {
       display: flex;
@@ -1686,6 +1761,47 @@
       opacity: 1;
     }
 
+    /* Pie shared stage switch */
+    .delta-pie-stagebar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 0 0 auto;
+      margin-bottom: 2px;
+    }
+    .delta-pie-stage-label {
+      font-size: 11px;
+      color: var(--text-secondary);
+      letter-spacing: 0.3px;
+    }
+    .delta-pie-stage-btns {
+      display: inline-flex;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-bright);
+      border-radius: var(--radius);
+      padding: 2px;
+      gap: 2px;
+    }
+    .delta-pie-stage-btn {
+      padding: 4px 12px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: all 0.2s;
+      letter-spacing: 0.3px;
+    }
+    .delta-pie-stage-btn:hover { color: var(--silver); }
+    .delta-pie-stage-btn.active {
+      background: linear-gradient(180deg, #e8e8e8, #c0c0c0);
+      color: #0a0a0a;
+      font-weight: 600;
+    }
+
     /* Pie row */
     .delta-pie-row {
       display: grid;
@@ -1865,6 +1981,32 @@
       overflow-x: auto;
       width: 100%;
     }
+
+    /* 状态饼实体级下钻明细表 */
+    .drill-status-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .drill-status-table thead th {
+      position: sticky;
+      top: 0;
+      background: var(--bg-alt);
+      color: var(--text-secondary);
+      text-align: left;
+      font-weight: 600;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-bright);
+      white-space: nowrap;
+    }
+    .drill-status-table tbody td {
+      padding: 8px 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      color: var(--text-primary, #e8e8e8);
+      word-break: break-word;
+    }
+    .drill-status-table tbody tr:hover td { background: rgba(255, 255, 255, 0.04); }
+    .drill-status-table .drill-pn-cell { font-weight: 600; white-space: nowrap; }
 
     .drill-table .drill-th-source,
     .drill-table .drill-td-source {
@@ -2815,7 +2957,16 @@
 
           <!-- Right Panel -->
           <div class="delta-right-col">
-            <!-- Top: Two pie charts side by side -->
+            <!-- Top: Two pie charts side by side (shared stage switch) -->
+            <div class="delta-pie-stagebar">
+              <span class="delta-pie-stage-label" data-i18n="pieStageLabel">阶段</span>
+              <div class="delta-pie-stage-btns" id="deltaPieStageBtns">
+                <button class="delta-pie-stage-btn active" data-stage="pre-TO" onclick="switchPieStage('pre-TO')">pre-TO</button>
+                <button class="delta-pie-stage-btn" data-stage="TO1" onclick="switchPieStage('TO1')">TO1</button>
+                <button class="delta-pie-stage-btn" data-stage="TO2" onclick="switchPieStage('TO2')">TO2</button>
+                <button class="delta-pie-stage-btn" data-stage="TO3" onclick="switchPieStage('TO3')">TO3</button>
+              </div>
+            </div>
             <div class="delta-pie-row">
               <div class="delta-panel delta-pie-panel">
                 <div class="delta-panel-title" data-i18n="deltaEcStatusTitle">EC 状态分布</div>
@@ -3001,6 +3152,30 @@
     </div>
   </div>
 
+  <!-- ==================== Status Pie Entity Drilldown Modal ==================== -->
+  <div class="drill-overlay" id="statusDrillOverlay" style="display:none;" onclick="if(event.target===this)closeStatusDrilldown()">
+    <div class="drill-modal">
+      <div class="drill-header">
+        <div class="drill-header-info">
+          <h3 id="statusDrillTitle">状态实体明细</h3>
+          <div class="drill-meta" id="statusDrillMeta"></div>
+        </div>
+        <button class="drill-close" onclick="closeStatusDrilldown()" title="关闭 (Esc)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="drill-toolbar">
+        <div class="drill-toolbar-left">
+          <input type="text" class="drill-search" id="statusDrillSearch" data-i18n-placeholder="statusDrillSearchPh" placeholder="搜索 PN / 实体号 / KEM..." oninput="onStatusDrillSearch()">
+          <span class="drill-count-badge" id="statusDrillCount">0</span>
+        </div>
+      </div>
+      <div class="drill-body" id="statusDrillBody">
+        <div class="drill-loading"><div class="spinner"></div><span data-i18n="drillLoading">加载中...</span></div>
+      </div>
+    </div>
+  </div>
+
   <!-- ==================== Welcome Bubble (first visit) ==================== -->
   <div class="welcome-bubble" id="welcomeBubble">
     <button class="welcome-bubble-close" onclick="dismissWelcomeBubble()" title="关闭">
@@ -3079,10 +3254,13 @@
         statParts: '零件号数',
         welcomeMsg: '您好！我是 F-Brain，您的车辆零件智能助手。我可以帮您查询零件信息、对比差异、分析EC状态等。请输入问题或点击下方建议开始对话。',
         thinking: '正在思考',
+        thinkingDetail: '思考过程',
+        generationStopped: '⏹ 已停止生成',
         viewRecords: '查看',
         detailedRecords: '条详细记录',
         collapseRecords: '收起',
         modeOllama: 'Ollama模式',
+        modeVllm: 'vLLM模式',
         modeRule: '规则模式',
         modeCloud: '云端模式',
         newChat: '新对话',
@@ -3213,7 +3391,13 @@
         deltaPathViewTitle: 'EC / ZEUS / SOMA 路径分布',
         deltaEcStatusTitle: 'EC 状态分布',
         deltaZeusStatusTitle: 'ZEUS 状态分布',
-        deltaTrendTitle: 'EC & ZEUS 数量趋势',
+        deltaTrendTitle: 'EC / ZEUS / ZGS升级 / KEM释放 趋势',
+        pieStageLabel: '阶段',
+        pieDrillHint: '点击查看实体明细',
+        statusDrillSearchPh: '搜索 PN / 实体号 / KEM...',
+        statusDrillEcNo: 'EC 号 (Bundle Number)',
+        statusDrillFavNo: 'FAV 号',
+        statusDrillStatus: '状态',
         // SVG tree node labels
         treePreTo: 'pre-TO',
         treeTo1: 'TO1',
@@ -3240,8 +3424,10 @@
         // Bar/Line chart labels
         barEcCount: 'EC数量',
         barZeusCount: 'ZEUS数量',
-        barEcTrend: 'EC趋势',
-        barZeusTrend: 'ZEUS趋势',
+        barEcTrend: 'EC',
+        barZeusTrend: 'ZEUS',
+        barZgsTrend: 'ZGS升级PN',
+        barKemTrend: 'KEM释放PN',
         barYAxisName: '数量',
         // Old dashboard
         drillNoEc: '不含EC零件号',
@@ -3300,10 +3486,13 @@
         statParts: 'Unique Part Numbers',
         welcomeMsg: 'Hello! I am F-Brain, your vehicle parts intelligence assistant. I can help you query part information, compare differences, analyze EC status, and more. Please enter a question or click a suggestion below to start.',
         thinking: 'Thinking',
+        thinkingDetail: 'Reasoning',
+        generationStopped: '⏹ Generation stopped',
         viewRecords: 'View',
         detailedRecords: 'detailed records',
         collapseRecords: 'Collapse',
         modeOllama: 'Ollama Mode',
+        modeVllm: 'vLLM Mode',
         modeRule: 'Rule Mode',
         modeCloud: 'Cloud Mode',
         newChat: 'New Chat',
@@ -3434,7 +3623,13 @@
         deltaPathViewTitle: 'EC / ZEUS / SOMA Path View',
         deltaEcStatusTitle: 'EC Status Distribution',
         deltaZeusStatusTitle: 'ZEUS Status Distribution',
-        deltaTrendTitle: 'EC & ZEUS Trend',
+        deltaTrendTitle: 'EC / ZEUS / ZGS Upgrade / KEM Release Trend',
+        pieStageLabel: 'Stage',
+        pieDrillHint: 'Click to view entity details',
+        statusDrillSearchPh: 'Search PN / entity no. / KEM...',
+        statusDrillEcNo: 'EC No. (Bundle Number)',
+        statusDrillFavNo: 'FAV No.',
+        statusDrillStatus: 'Status',
         // SVG tree node labels
         treePreTo: 'pre-TO',
         treeTo1: 'TO1',
@@ -3461,8 +3656,10 @@
         // Bar/Line chart labels
         barEcCount: 'EC Count',
         barZeusCount: 'ZEUS Count',
-        barEcTrend: 'EC Trend',
-        barZeusTrend: 'ZEUS Trend',
+        barEcTrend: 'EC',
+        barZeusTrend: 'ZEUS',
+        barZgsTrend: 'ZGS Upgraded PN',
+        barKemTrend: 'KEM Released PN',
         barYAxisName: 'Count',
         // Old dashboard
         drillNoEc: 'PN without EC',
@@ -3524,10 +3721,13 @@
         statParts: 'Eindeutige Teilenummern',
         welcomeMsg: 'Hallo! Ich bin F-Brain, Ihr intelligenter Assistent für Fahrzeugteile. Ich kann Ihnen bei der Abfrage von Teileinformationen, dem Vergleich von Unterschieden, der Analyse des EC-Status und mehr helfen. Bitte geben Sie eine Frage ein oder klicken Sie auf einen Vorschlag unten.',
         thinking: 'Denkt nach',
+        thinkingDetail: 'Überlegung',
+        generationStopped: '⏹ Generierung gestoppt',
         viewRecords: 'Ansehen',
         detailedRecords: 'detaillierte Datensätze',
         collapseRecords: 'Einklappen',
         modeOllama: 'Ollama-Modus',
+        modeVllm: 'vLLM-Modus',
         modeRule: 'Regelmodus',
         modeCloud: 'Cloud-Modus',
         newChat: 'Neuer Chat',
@@ -3655,7 +3855,13 @@
         deltaPathViewTitle: 'EC / ZEUS / SOMA Pfadansicht',
         deltaEcStatusTitle: 'EC-Statusverteilung',
         deltaZeusStatusTitle: 'ZEUS-Statusverteilung',
-        deltaTrendTitle: 'EC & ZEUS Trend',
+        deltaTrendTitle: 'EC / ZEUS / ZGS-Hochrüstung / KEM-Freigabe Trend',
+        pieStageLabel: 'Phase',
+        pieDrillHint: 'Klicken für Entitätsdetails',
+        statusDrillSearchPh: 'PN / Entitätsnr. / KEM suchen...',
+        statusDrillEcNo: 'EC-Nr. (Bundle Number)',
+        statusDrillFavNo: 'FAV-Nr.',
+        statusDrillStatus: 'Status',
         // SVG tree node labels
         treePreTo: 'pre-TO',
         treeTo1: 'TO1',
@@ -3682,8 +3888,10 @@
         // Bar/Line chart labels
         barEcCount: 'EC-Anzahl',
         barZeusCount: 'ZEUS-Anzahl',
-        barEcTrend: 'EC-Trend',
-        barZeusTrend: 'ZEUS-Trend',
+        barEcTrend: 'EC',
+        barZeusTrend: 'ZEUS',
+        barZgsTrend: 'ZGS-Hochrüstung PN',
+        barKemTrend: 'KEM-Freigabe PN',
         barYAxisName: 'Anzahl',
         // Old dashboard
         drillNoEc: 'Teile ohne EC',
@@ -3770,6 +3978,7 @@
       if (statusEl && statusEl.dataset.mode) {
         if (statusEl.dataset.mode === 'cloud') statusEl.textContent = t('modeCloud');
         else if (statusEl.dataset.mode === 'ollama') statusEl.textContent = t('modeOllama');
+        else if (statusEl.dataset.mode === 'vllm') statusEl.textContent = t('modeVllm');
         else statusEl.textContent = t('modeRule');
       } else if (statusEl && statusEl.dataset.offline === 'true') {
         statusEl.textContent = t('agentOffline');
@@ -3816,6 +4025,10 @@
     var _deltaPollInterval = 30000; // 轮询间隔 30s
     var _deltaFilterLevel = null; // Current drill-down filter level: null(all), ec, zeus, soma, noec, nozeus
     var _deltaFilterSide = null;  // Which delta side the filter applies to: 1 or 2
+    var _pieStage = 'pre-TO';     // EC/ZEUS 状态饼图联动查看的阶段
+    var _pieEventsBound = false;  // 饼块 click 下钻事件是否已绑定
+    // 状态饼下钻弹层状态 {stage, kind, status, items, total, search, page}
+    var _statusDrillState = { stage: '', kind: '', status: '', items: [], total: 0, search: '' };
 
     // Mock data - will be replaced with API data later
     var _deltaMockData = {
@@ -3934,172 +4147,81 @@
       return mock ? mock.kpi : noData;
     }
 
-    // Helper: get stage ratio data for a delta (used for pie chart filtering)
-    function _getStageRatioData(deltaNum) {
-      // deltaN 对比的是第 N 个相邻区间, 饼图/漏斗取后一阶段
-      var stageKeyMap = { 1: 'TO1', 2: 'TO2', 3: 'TO3' };
-      var stageKey = stageKeyMap[deltaNum] || 'TO2';
-      var stages = _deltaApiData ? _deltaApiData.stages : null;
-      if (stages && stages[stageKey]) {
-        return {
-          ecPn: stages[stageKey].ec_pn || 0,
-          favPn: stages[stageKey].fav_pn || 0,
-          somaJa: stages[stageKey].soma_ja || 0
-        };
+    // === 阶段联动状态饼 (去重实体口径, 数据来自 stage_status) ===
+    var _PIE_STAGES = ['pre-TO', 'TO1', 'TO2', 'TO3'];
+
+    function _getStageRatio(stage) {
+      var st = _deltaApiData && _deltaApiData.stages ? _deltaApiData.stages[stage] : null;
+      if (st) {
+        return { ecPn: st.ec_pn || 0, favPn: st.fav_pn || 0, somaJa: st.soma_ja || 0 };
       }
-      // Fallback to mock defaults (delta3 无 mock, 返回 0)
-      var mockFallback = {
-        1: { ecPn: 1980, favPn: 694, somaJa: 310 },
-        2: { ecPn: 2022, favPn: 699, somaJa: 295 },
-        3: { ecPn: 0, favPn: 0, somaJa: 0 }
+      return { ecPn: 0, favPn: 0, somaJa: 0 };
+    }
+
+    // 按树节点下钻层级缩放饼图 (与旧 delta 饼图同一套比例规则)
+    function _applyPieLevelFilter(src, kind, level, ratio) {
+      if (!level || level === 'all') return src;
+      var scale = function(items, r) {
+        return items.map(function(item) {
+          return { name: item.name, value: Math.round(item.value * r), itemStyle: item.itemStyle };
+        });
       };
-      return mockFallback[deltaNum] || mockFallback[2];
-    }
-
-    // Helper: get EC pie data for a delta (with colors applied, filtered by drill-down level)
-    function _getEcPieData(deltaNum) {
-      var src;
-      var apiDelta = _deltaApiData ? _deltaApiData['delta' + deltaNum] : null;
-      if (apiDelta && apiDelta.ec_pie) {
-        src = apiDelta.ec_pie.map(function(item) {
-          return {
-            name: item.name,
-            value: item.value,
-            itemStyle: { color: _getEcColor(item.name) }
-          };
-        });
-      } else {
-        var mock = _deltaMockData['delta' + deltaNum];
-        src = mock ? mock.ecPie : [];
-      }
-
-      // Apply drill-down filter
-      var level = _deltaFilterLevel;
-      if (!level || level === 'all') return src;
-
-      var ratioData = _getStageRatioData(deltaNum);
-
-      if (level === 'noec') {
-        // No EC selected: EC pie shows "无EC" only
-        return [{ value: ratioData.ecPn ? 1 : 0, name: t('treeNoEc'), itemStyle: { color: '#6b7280' } }];
-      }
-
-      if (level === 'nozeus') {
-        // No ZEUS selected: EC pie stays normal (no ZEUS still has EC data)
-        return src;
-      }
-
-      if (level === 'ec') {
-        // EC level: EC pie stays the same (full EC data)
-        return src;
-      }
-
-      if (level === 'zeus') {
-        // ZEUS level: EC pie scaled by fav_pn / ec_pn ratio
-        if (ratioData.ecPn > 0 && ratioData.favPn > 0) {
-          var ratio = ratioData.favPn / ratioData.ecPn;
-          return src.map(function(item) {
-            return {
-              name: item.name,
-              value: Math.round(item.value * ratio),
-              itemStyle: item.itemStyle
-            };
-          });
+      if (kind === 'ec') {
+        if (level === 'noec') {
+          return [{ value: ratio.ecPn ? 1 : 0, name: t('treeNoEc'), itemStyle: { color: '#6b7280' } }];
         }
-        return src;
-      }
-
-      if (level === 'soma') {
-        // SOMA level: EC pie scaled by soma_ja / ec_pn ratio
-        if (ratioData.ecPn > 0 && ratioData.somaJa > 0) {
-          var somaRatio = ratioData.somaJa / ratioData.ecPn;
-          return src.map(function(item) {
-            return {
-              name: item.name,
-              value: Math.round(item.value * somaRatio),
-              itemStyle: item.itemStyle
-            };
-          });
+        if (level === 'zeus' && ratio.ecPn > 0 && ratio.favPn > 0) {
+          return scale(src, ratio.favPn / ratio.ecPn);
         }
-        return src;
+        if (level === 'soma' && ratio.ecPn > 0 && ratio.somaJa > 0) {
+          return scale(src, ratio.somaJa / ratio.ecPn);
+        }
+        return src; // ec / nozeus 保持原样
       }
-
-      return src;
-    }
-
-    // Helper: get ZEUS pie data for a delta (with colors applied, filtered by drill-down level)
-    function _getZeusPieData(deltaNum) {
-      var src;
-      var apiDelta = _deltaApiData ? _deltaApiData['delta' + deltaNum] : null;
-      if (apiDelta && apiDelta.fav_pie) {
-        src = apiDelta.fav_pie.map(function(item) {
-          return {
-            name: item.name,
-            value: item.value,
-            itemStyle: { color: _getZeusColor(item.name) }
-          };
-        });
-      } else {
-        var mock = _deltaMockData['delta' + deltaNum];
-        src = mock ? mock.zeusPie : [];
-      }
-
-      // Apply drill-down filter
-      var level = _deltaFilterLevel;
-      if (!level || level === 'all') return src;
-
-      var ratioData = _getStageRatioData(deltaNum);
-
+      // zeus
       if (level === 'nozeus') {
-        // No ZEUS selected: ZEUS pie shows "无ZEUS" only
-        return [{ value: ratioData.favPn ? 1 : 0, name: t('treeNoZeus'), itemStyle: { color: '#6b7280' } }];
+        return [{ value: ratio.favPn ? 1 : 0, name: t('treeNoZeus'), itemStyle: { color: '#6b7280' } }];
       }
-
       if (level === 'noec') {
-        // No EC selected: ZEUS pie shows empty (no EC means no ZEUS)
         return [{ value: 1, name: t('pieNoData'), itemStyle: { color: '#374151' } }];
       }
-
-      if (level === 'zeus') {
-        // ZEUS level: ZEUS pie stays the same (full ZEUS data)
-        return src;
+      if (level === 'ec' && ratio.ecPn > 0 && ratio.favPn > 0) {
+        return scale(src, ratio.favPn / ratio.ecPn);
       }
-
-      if (level === 'ec') {
-        // EC level: ZEUS pie scaled by fav_pn / ec_pn ratio
-        // Wait - actually when EC is selected, the ZEUS pie should show the ZEUS distribution within EC
-        // Since the ZEUS pie already only contains EC+ZEUS data, we scale by (fav_pn / ec_pn)
-        // But the ZEUS pie data already represents the full ZEUS population, so we need to
-        // proportionally reduce it to match the EC-level view
-        if (ratioData.ecPn > 0 && ratioData.favPn > 0) {
-          var ratio = ratioData.favPn / ratioData.ecPn;
-          return src.map(function(item) {
-            return {
-              name: item.name,
-              value: Math.round(item.value * ratio),
-              itemStyle: item.itemStyle
-            };
-          });
-        }
-        return src;
+      if (level === 'soma' && ratio.favPn > 0 && ratio.somaJa > 0) {
+        return scale(src, ratio.somaJa / ratio.favPn);
       }
+      return src; // zeus 保持原样
+    }
 
-      if (level === 'soma') {
-        // SOMA level: ZEUS pie scaled by soma_ja / fav_pn ratio
-        if (ratioData.favPn > 0 && ratioData.somaJa > 0) {
-          var somaRatio = ratioData.somaJa / ratioData.favPn;
-          return src.map(function(item) {
-            return {
-              name: item.name,
-              value: Math.round(item.value * somaRatio),
-              itemStyle: item.itemStyle
-            };
-          });
-        }
-        return src;
+    // 取当前 _pieStage 的状态分布 (带颜色 + 树层级过滤); kind: 'ec' | 'zeus'
+    function _getStagePieData(kind) {
+      var key = kind === 'ec' ? 'ec_pie' : 'fav_pie';
+      var colorFn = kind === 'ec' ? _getEcColor : _getZeusColor;
+      var raw = [];
+      var ss = (_deltaApiData && _deltaApiData.stage_status) ? _deltaApiData.stage_status[_pieStage] : null;
+      if (ss && ss[key]) {
+        raw = ss[key].map(function(item) {
+          return { name: item.name, value: item.value, itemStyle: { color: colorFn(item.name) } };
+        });
+      } else if (!_deltaApiData) {
+        // API 未就绪时的 mock 兜底: TO1/TO2/TO3 沿用旧 delta mock
+        var stageToDelta = { 'TO1': 1, 'TO2': 2, 'TO3': 3 };
+        var dn = stageToDelta[_pieStage];
+        if (dn) raw = kind === 'ec' ? _deltaMockData['delta' + dn].ecPie : _deltaMockData['delta' + dn].zeusPie;
       }
+      return _applyPieLevelFilter(raw, kind, _deltaFilterLevel, _getStageRatio(_pieStage));
+    }
 
-      return src;
+    // 切换两个状态饼联动查看的阶段
+    function switchPieStage(stage) {
+      if (_PIE_STAGES.indexOf(stage) < 0 || stage === _pieStage) return;
+      _pieStage = stage;
+      document.querySelectorAll('#deltaPieStageBtns [data-stage]').forEach(function(b) {
+        b.classList.toggle('active', b.getAttribute('data-stage') === stage);
+      });
+      renderDeltaEcPie();
+      renderDeltaZeusPie();
     }
 
     // Helper: get stage data for SVG tree (API or mock fallback)
@@ -4617,6 +4739,21 @@
       _deltaCharts.zeusPie = echarts.init(zeusPieEl);
       _deltaCharts.barLine = echarts.init(barLineEl);
 
+      // 饼块点击 → 实体级状态下钻 (忽略树过滤产生的占位块)
+      function _isPiePlaceholder(name) {
+        return name === t('treeNoEc') || name === t('treeNoZeus') || name === t('pieNoData');
+      }
+      _deltaCharts.ecPie.on('click', function(params) {
+        if (params && params.seriesType === 'pie' && params.name && !_isPiePlaceholder(params.name)) {
+          openStatusDrilldown(_pieStage, 'ec', params.name);
+        }
+      });
+      _deltaCharts.zeusPie.on('click', function(params) {
+        if (params && params.seriesType === 'pie' && params.name && !_isPiePlaceholder(params.name)) {
+          openStatusDrilldown(_pieStage, 'zeus', params.name);
+        }
+      });
+
       // Handle window resize
       var resizeTimer = null;
       window.addEventListener('resize', function() {
@@ -4734,8 +4871,9 @@
     }
 
     function updatePieCharts(deltaNum) {
-      var ecData = _getEcPieData(deltaNum);
-      var zeusData = _getZeusPieData(deltaNum);
+      // 状态饼已改为按独立阶段 _pieStage 联动, 不再跟随 Delta 区间切换
+      var ecData = _getStagePieData('ec');
+      var zeusData = _getStagePieData('zeus');
 
       if (_deltaCharts.ecPie) {
         _deltaCharts.ecPie.setOption({
@@ -4751,7 +4889,7 @@
     }
 
     function renderDeltaEcPie() {
-      var data = _getEcPieData(_deltaCurrent);
+      var data = _getStagePieData('ec');
 
       _deltaCharts.ecPie.setOption({
         backgroundColor: 'transparent',
@@ -4760,7 +4898,10 @@
           backgroundColor: 'rgba(20, 20, 20, 0.95)',
           borderColor: '#3a3a3a',
           textStyle: { color: '#e8e8e8', fontSize: 12 },
-          formatter: '{b}: {c} ({d}%)'
+          formatter: function(p) {
+            return p.name + ': ' + p.value + ' (' + p.percent + '%)<br/>' +
+                   '<span style="font-size:10px;color:#9ca3af;">' + t('pieDrillHint') + '</span>';
+          }
         },
         legend: {
           orient: 'vertical',
@@ -4797,7 +4938,7 @@
     }
 
     function renderDeltaZeusPie() {
-      var data = _getZeusPieData(_deltaCurrent);
+      var data = _getStagePieData('zeus');
 
       _deltaCharts.zeusPie.setOption({
         backgroundColor: 'transparent',
@@ -4806,7 +4947,10 @@
           backgroundColor: 'rgba(20, 20, 20, 0.95)',
           borderColor: '#3a3a3a',
           textStyle: { color: '#e8e8e8', fontSize: 12 },
-          formatter: '{b}: {c} ({d}%)'
+          formatter: function(p) {
+            return p.name + ': ' + p.value + ' (' + p.percent + '%)<br/>' +
+                   '<span style="font-size:10px;color:#9ca3af;">' + t('pieDrillHint') + '</span>';
+          }
         },
         legend: {
           orient: 'vertical',
@@ -4846,20 +4990,46 @@
       // This chart does NOT change with Delta switch
       // Get data from API or use default fallback
       var stages = ['pre-TO', 'TO1', 'TO2', 'TO3'];
-      // Fallback: distinct EC (Bundle Number) / ZEUS (FAV) counts aligned on
-      // each stage's PN set (same metric the backend bar_line provides).
-      var ecCounts = [2403, 2600, 2552, 0];
-      var favCounts = [421, 471, 471, 0];
+      // Fallback: distinct EC (Bundle Number) / ZEUS (FAV) counts, cumulative
+      // ZGS-upgraded PN (relative to pre-TO) and KEM-released PN, all aligned
+      // on each stage's PN set (same metric the backend bar_line provides).
+      var ecCounts = [2791, 2660, 2588, 2574];
+      var favCounts = [474, 479, 474, 470];
+      var zgsCounts = [0, 402, 467, 501];
+      var kemCounts = [1709, 1706, 1700, 1692];
 
       if (_deltaApiData && _deltaApiData.bar_line) {
-        stages = _deltaApiData.bar_line.stages;
-        ecCounts = _deltaApiData.bar_line.ec_counts;
-        favCounts = _deltaApiData.bar_line.fav_counts;
+        var bl = _deltaApiData.bar_line;
+        stages = bl.stages;
+        ecCounts = bl.ec_counts;
+        favCounts = bl.fav_counts;
+        zgsCounts = bl.zgs_upgrade_counts;
+        kemCounts = bl.kem_release_counts;
       }
 
-      // Bars show the real PN-aligned counts for all three stages (incl. pre-TO).
-      var ecBarData = ecCounts;
-      var favBarData = favCounts;
+      function valueLabel(params) {
+        return params.value > 0 ? params.value : '';
+      }
+
+      function lineSeries(name, color, data) {
+        return {
+          name: name,
+          type: 'line',
+          smooth: true,
+          symbol: 'circle',
+          symbolSize: 7,
+          lineStyle: { color: color, width: 2.5 },
+          itemStyle: { color: color },
+          label: {
+            show: true,
+            position: 'top',
+            color: color,
+            fontSize: 10,
+            formatter: valueLabel
+          },
+          data: data
+        };
+      }
 
       _deltaCharts.barLine.setOption({
         backgroundColor: 'transparent',
@@ -4874,7 +5044,7 @@
           }
         },
         legend: {
-          data: [t('barEcCount'), t('barZeusCount'), t('barEcTrend'), t('barZeusTrend')],
+          data: [t('barEcTrend'), t('barZeusTrend'), t('barZgsTrend'), t('barKemTrend')],
           textStyle: { color: '#9ca3af', fontSize: 11 },
           top: 0,
           itemWidth: 14,
@@ -4906,64 +5076,10 @@
           }
         ],
         series: [
-          {
-            name: t('barEcCount'),
-            type: 'bar',
-            barWidth: '22%',
-            itemStyle: {
-              color: '#3b82f6',
-              borderRadius: [3, 3, 0, 0]
-            },
-            data: ecBarData
-          },
-          {
-            name: t('barZeusCount'),
-            type: 'bar',
-            barWidth: '22%',
-            itemStyle: {
-              color: '#8b5cf6',
-              borderRadius: [3, 3, 0, 0]
-            },
-            data: favBarData
-          },
-          {
-            name: t('barEcTrend'),
-            type: 'line',
-            smooth: true,
-            symbol: 'circle',
-            symbolSize: 6,
-            lineStyle: { color: '#60a5fa', width: 2 },
-            itemStyle: { color: '#60a5fa' },
-            label: {
-              show: true,
-              position: 'top',
-              color: '#93c5fd',
-              fontSize: 10,
-              formatter: function(params) {
-                return params.value > 0 ? params.value : '';
-              }
-            },
-            data: ecCounts
-          },
-          {
-            name: t('barZeusTrend'),
-            type: 'line',
-            smooth: true,
-            symbol: 'circle',
-            symbolSize: 6,
-            lineStyle: { color: '#a78bfa', width: 2 },
-            itemStyle: { color: '#a78bfa' },
-            label: {
-              show: true,
-              position: 'top',
-              color: '#c4b5fd',
-              fontSize: 10,
-              formatter: function(params) {
-                return params.value > 0 ? params.value : '';
-              }
-            },
-            data: favCounts
-          }
+          lineSeries(t('barEcTrend'), '#60a5fa', ecCounts),
+          lineSeries(t('barZeusTrend'), '#a78bfa', favCounts),
+          lineSeries(t('barZgsTrend'), '#34d399', zgsCounts),
+          lineSeries(t('barKemTrend'), '#fbbf24', kemCounts)
         ]
       });
     }
@@ -5110,6 +5226,105 @@
     function closeHomeDrilldown() {
       var overlay = document.getElementById('homeDrillOverlay');
       if (overlay) overlay.style.display = 'none';
+    }
+
+    // ==================== 状态饼实体级下钻 ====================
+    function openStatusDrilldown(stage, kind, status) {
+      _statusDrillState.stage = stage;
+      _statusDrillState.kind = kind;
+      _statusDrillState.status = status;
+      _statusDrillState.items = [];
+      _statusDrillState.total = 0;
+      _statusDrillState.search = '';
+
+      var kindLabel = kind === 'ec' ? t('deltaEcStatusTitle') : t('deltaZeusStatusTitle');
+      var entityLabel = kind === 'ec' ? t('statusDrillEcNo') : t('statusDrillFavNo');
+      var searchInput = document.getElementById('statusDrillSearch');
+      if (searchInput) searchInput.value = '';
+
+      document.getElementById('statusDrillTitle').textContent =
+        kindLabel + ' · ' + status;
+      document.getElementById('statusDrillMeta').innerHTML =
+        '<span>' + t('pieStageLabel') + ': <strong>' + stage + '</strong></span>' +
+        '<span>' + t('drillCategory') + ': <strong>' + status + '</strong></span>' +
+        '<span id="statusDrillEntityColLabel">' + entityLabel + '</span>';
+      document.getElementById('statusDrillBody').innerHTML =
+        '<div class="drill-loading"><div class="spinner"></div><span>' + t('drillLoading') + '</span></div>';
+      document.getElementById('statusDrillOverlay').style.display = 'flex';
+
+      var url = '/api/delta/status_drilldown?stage=' + encodeURIComponent(stage) +
+                '&kind=' + encodeURIComponent(kind) +
+                '&status=' + encodeURIComponent(status) +
+                '&page=1&page_size=10000';
+      fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(json) {
+          if (json && json.success && json.data) {
+            _statusDrillState.items = json.data.items || [];
+            _statusDrillState.total = json.data.total || 0;
+            renderStatusDrilldown();
+          } else {
+            document.getElementById('statusDrillBody').innerHTML =
+              '<div class="drill-loading">' + ((json && json.error) || t('drillLoadFailed')) + '</div>';
+          }
+        })
+        .catch(function(err) {
+          document.getElementById('statusDrillBody').innerHTML =
+            '<div class="drill-loading">' + t('drillLoadFailed') + ': ' + err.message + '</div>';
+        });
+    }
+
+    function closeStatusDrilldown() {
+      var overlay = document.getElementById('statusDrillOverlay');
+      if (overlay) overlay.style.display = 'none';
+    }
+
+    var _statusDrillSearchTimer = null;
+    function onStatusDrillSearch() {
+      // 一次拉全量, 本地过滤 (实体数 ≤ 数千)
+      var input = document.getElementById('statusDrillSearch');
+      _statusDrillState.search = (input.value || '').trim().toLowerCase();
+      if (_statusDrillSearchTimer) clearTimeout(_statusDrillSearchTimer);
+      _statusDrillSearchTimer = setTimeout(renderStatusDrilldown, 120);
+    }
+
+    function renderStatusDrilldown() {
+      var kind = _statusDrillState.kind;
+      var q = _statusDrillState.search;
+      var items = _statusDrillState.items.filter(function(it) {
+        if (!q) return true;
+        return (it.pn || '').toLowerCase().indexOf(q) >= 0 ||
+               (it.entity || '').toLowerCase().indexOf(q) >= 0 ||
+               (it.kem || '').toLowerCase().indexOf(q) >= 0;
+      });
+
+      document.getElementById('statusDrillCount').textContent =
+        items.length + ' / ' + _statusDrillState.total;
+
+      var entityTh = kind === 'ec' ? t('statusDrillEcNo') : t('statusDrillFavNo');
+      var rows = items.map(function(it) {
+        return '<tr>' +
+                 '<td class="drill-pn-cell">' + _homeDrillFormatVal(it.pn) + '</td>' +
+                 '<td>' + _homeDrillFormatVal(it.entity) + '</td>' +
+                 '<td>' + _homeDrillFormatVal(it.status) + '</td>' +
+                 '<td>' + _homeDrillFormatVal(it.kem) + '</td>' +
+                 '<td>' + _homeDrillFormatVal(it.soma) + '</td>' +
+               '</tr>';
+      }).join('');
+
+      var body = items.length
+        ? '<div class="drill-table-wrap"><table class="drill-status-table">' +
+            '<thead><tr>' +
+              '<th>PN</th>' +
+              '<th>' + entityTh + '</th>' +
+              '<th>' + t('statusDrillStatus') + '</th>' +
+              '<th>KEM</th>' +
+              '<th>SOMA</th>' +
+            '</tr></thead>' +
+            '<tbody>' + rows + '</tbody>' +
+          '</table></div>'
+        : '<div class="drill-loading">' + t('drillNoResults') + '</div>';
+      document.getElementById('statusDrillBody').innerHTML = body;
     }
 
     function setHomeDrillFilter(filter) {
@@ -5489,6 +5704,7 @@
             text.dataset.offline = 'false';
             if (json.mode === 'cloud') text.textContent = t('modeCloud');
             else if (json.mode === 'ollama') text.textContent = t('modeOllama');
+            else if (json.mode === 'vllm') text.textContent = t('modeVllm');
             else text.textContent = t('modeRule');
           } else {
             badge.classList.add('offline');
@@ -5542,7 +5758,7 @@
             let modeCls = 'mode-rule';
             let modeText = t('modeRule');
             if (extra.mode === 'cloud') { modeCls = 'mode-cloud'; modeText = t('modeCloud'); }
-            else if (extra.mode === 'ollama') { modeCls = 'mode-ollama'; modeText = t('modeOllama'); }
+            else if (extra.mode === 'ollama' || extra.mode === 'vllm') { modeCls = 'mode-ollama'; modeText = extra.mode === 'vllm' ? t('modeVllm') : t('modeOllama'); }
             modeTag.className = 'chat-tag ' + modeCls;
             modeTag.textContent = modeText;
             meta.appendChild(modeTag);
@@ -5616,6 +5832,200 @@
       updateChatTip();
     }
 
+    // ==================== Streaming agent message ====================
+    function createStreamingMessage() {
+      const container = document.getElementById('chatMessages');
+      const msgDiv = document.createElement('div');
+      msgDiv.className = 'chat-message agent';
+
+      const avatar = document.createElement('div');
+      avatar.className = 'chat-avatar agent';
+      avatar.innerHTML = '<svg viewBox="0 0 32 32" fill="currentColor"><path d="M21.5 7.5c0-2.5-2-4.5-4.5-4.5s-4.5 2-4.5 4.5v.5h9v-.5zM10 10.5c-1.4 0-2.5 1.1-2.5 2.5v1.5c0 1.4 1.1 2.5 2.5 2.5v-6.5zM22 10.5v6.5c1.4 0 2.5-1.1 2.5-2.5v-1.5c0-1.4-1.1-2.5-2.5-2.5zM12.5 22.5c0 1.4 1.1 2.5 2.5 2.5h3c1.4 0 2.5-1.1 2.5-2.5v-2h-8v2zM7.5 16H5.5c-1.9 0-3.5-1.6-3.5-3.5v-1.5c0-1.9 1.6-3.5 3.5-3.5h.5v8.5zM24.5 16h2c1.9 0 3.5-1.6 3.5-3.5v-1.5c0-1.9-1.6-3.5-3.5-3.5h-.5v8.5zM8.5 20.5H6.5c-1.4 0-2.5-1.1-2.5-2.5v-1.5h4.5v4zM23.5 20.5h2c1.4 0 2.5-1.1 2.5-2.5v-1.5h-4.5v4zM13 13.5h1.5v-2H13v2zM17.5 13.5H19v-2h-1.5v2zM14.5 17h3v-2h-3v2zM13 20.5h6v-2h-6v2z"/></svg>';
+
+      const bubbleWrap = document.createElement('div');
+      bubbleWrap.className = 'chat-bubble-wrap';
+
+      // 思考框 (默认折叠, 点击头部展开; 内部 150px 滚动可看全文)
+      const thinkBox = document.createElement('div');
+      thinkBox.className = 'thinking-box';
+      thinkBox.style.display = 'none';
+      thinkBox.innerHTML =
+        '<div class="thinking-header">' +
+          '<span class="thinking-caret">▶</span>' +
+          '<span class="thinking-title"></span>' +
+          '<span class="thinking-stage"><span class="thinking-spinner"></span><span class="thinking-stage-text"></span></span>' +
+        '</div>' +
+        '<div class="thinking-body thinking-pulse"></div>';
+      const thinkHeader = thinkBox.querySelector('.thinking-header');
+      const thinkTitle = thinkBox.querySelector('.thinking-title');
+      const thinkBody = thinkBox.querySelector('.thinking-body');
+      const stageText = thinkBox.querySelector('.thinking-stage-text');
+      thinkTitle.textContent = t('thinkingDetail');
+      thinkHeader.addEventListener('click', function() {
+        thinkBox.classList.toggle('expanded');
+        if (thinkBox.classList.contains('expanded')) {
+          thinkBody.scrollTop = thinkBody.scrollHeight;
+        }
+      });
+
+      // 阶段提示 (无思考流时给用户反馈)
+      const stageHint = document.createElement('div');
+      stageHint.className = 'chat-stage-hint';
+      stageHint.style.display = 'none';
+      stageHint.innerHTML = '<span class="thinking-spinner"></span><span class="stage-text"></span>';
+      const stageHintText = stageHint.querySelector('.stage-text');
+
+      // 正文气泡
+      const bubble = document.createElement('div');
+      bubble.className = 'chat-bubble stream-bubble streaming';
+      bubble.style.display = 'none';
+
+      bubbleWrap.appendChild(thinkBox);
+      bubbleWrap.appendChild(stageHint);
+      bubbleWrap.appendChild(bubble);
+
+      msgDiv.appendChild(avatar);
+      msgDiv.appendChild(bubbleWrap);
+      container.appendChild(msgDiv);
+
+      const handle = {
+        msgDiv: msgDiv,
+        wrap: bubbleWrap,
+        bubble: bubble,
+        answerHtml: '',
+        thinkingText: '',
+        hasThinking: false,
+        thinkingAutoExpanded: false,
+        scroll: function() { container.scrollTop = container.scrollHeight; },
+        setStage: function(label) {
+          if (!this.hasThinking) {
+            stageHint.style.display = 'flex';
+            stageHintText.textContent = label;
+            this.scroll();
+          } else if (stageText) {
+            stageText.textContent = label;
+          }
+        },
+        appendThinking: function(delta) {
+          if (!delta) return;
+          if (!this.hasThinking) {
+            this.hasThinking = true;
+            thinkBox.style.display = 'block';
+            stageHint.style.display = 'none';
+            // 思考进行中默认展开, 让用户实时看到; 结束后自动折叠
+            thinkBox.classList.add('expanded');
+            this.thinkingAutoExpanded = true;
+          }
+          this.thinkingText += delta;
+          thinkBody.textContent = this.thinkingText;
+          thinkBody.scrollTop = thinkBody.scrollHeight;
+          this.scroll();
+        },
+        appendAnswer: function(delta) {
+          if (!delta) return;
+          if (bubble.style.display === 'none') {
+            bubble.style.display = 'block';
+            stageHint.style.display = 'none';
+          }
+          this.answerHtml += escapeHtml(delta);
+          bubble.innerHTML = this.answerHtml.replace(/\n/g, '<br>');
+          this.scroll();
+        },
+        finishThinking: function() {
+          thinkBody.classList.remove('thinking-pulse');
+          thinkBox.classList.add('done');
+          if (this.thinkingAutoExpanded) {
+            thinkBox.classList.remove('expanded');
+          }
+        },
+        finish: function() {
+          bubble.classList.remove('streaming');
+          this.finishThinking();
+        },
+        // 最终结果: 标签/明细/对比, 与 addMessage extra 渲染保持一致
+        renderResult: function(ev) {
+          this.finish();
+          const extra = {
+            mode: ev.mode,
+            is_table_related: ev.is_table_related,
+            intent: ev.intent,
+            search_results: ev.search_results,
+            is_compare: ev.is_compare,
+            compare_result: ev.compare_result
+          };
+          appendMessageExtras(this.wrap, extra);
+          this.scroll();
+        }
+      };
+      handle.scroll();
+      return handle;
+    }
+
+    // 把模式/相关性标签、明细折叠卡、对比结果追加到气泡 wrap
+    function appendMessageExtras(bubbleWrap, extra) {
+      if (!extra) return;
+      if (extra.mode || extra.is_table_related !== undefined || extra.intent) {
+        const meta = document.createElement('div');
+        meta.className = 'chat-meta';
+        if (extra.mode) {
+          const modeTag = document.createElement('span');
+          let modeCls = 'mode-rule';
+          let modeText = t('modeRule');
+          if (extra.mode === 'cloud') { modeCls = 'mode-cloud'; modeText = t('modeCloud'); }
+          else if (extra.mode === 'ollama' || extra.mode === 'vllm') { modeCls = 'mode-ollama'; modeText = t('modeOllama'); }
+          modeTag.className = 'chat-tag ' + modeCls;
+          modeTag.textContent = modeText;
+          meta.appendChild(modeTag);
+        }
+        if (extra.is_table_related !== undefined) {
+          const relTag = document.createElement('span');
+          relTag.className = 'chat-tag ' + (extra.is_table_related ? 'related' : 'off-topic');
+          relTag.textContent = extra.is_table_related ? t('related') : t('offTopic');
+          meta.appendChild(relTag);
+        }
+        if (extra.intent) {
+          const intentTag = document.createElement('span');
+          intentTag.className = 'chat-tag intent';
+          intentTag.textContent = (typeof extra.intent === 'object')
+            ? (extra.intent.question_type || 'query') : extra.intent;
+          meta.appendChild(intentTag);
+        }
+        bubbleWrap.appendChild(meta);
+      }
+
+      if (extra.search_results && extra.search_results.length > 0) {
+        const count = extra.search_results.length;
+        const btn = document.createElement('button');
+        btn.className = 'chat-action-btn';
+        const btnLabel = document.createElement('span');
+        btnLabel.textContent = t('viewRecords') + ' ' + count + ' ' + t('detailedRecords');
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5v4h4V5H3zm6 0v4h4V5H9zm6 0v4h4V5h-4zM3 11v4h4v-4H3zm6 0v4h4v-4H9zm6 0v4h4v-4h-4zM3 17v4h4v-4H3zm6 0v4h4v-4H9zm6 0v4h4v-4h-4z"/></svg>';
+        btn.appendChild(btnLabel);
+
+        const recordsContainer = document.createElement('div');
+        recordsContainer.className = 'chat-records';
+        recordsContainer.style.display = 'none';
+        renderRecordCards(extra.search_results, recordsContainer);
+
+        let expanded = false;
+        btn.addEventListener('click', function() {
+          expanded = !expanded;
+          recordsContainer.style.display = expanded ? 'flex' : 'none';
+          btnLabel.textContent = expanded
+            ? t('collapseRecords') + ' ' + count + ' ' + t('detailedRecords')
+            : t('viewRecords') + ' ' + count + ' ' + t('detailedRecords');
+        });
+        bubbleWrap.appendChild(btn);
+        bubbleWrap.appendChild(recordsContainer);
+      }
+
+      if (extra.is_compare && extra.compare_result) {
+        const compareDiv = document.createElement('div');
+        compareDiv.innerHTML = renderCompareResult(extra.compare_result);
+        if (compareDiv.firstChild) bubbleWrap.appendChild(compareDiv.firstChild);
+      }
+    }
+
     function showTypingIndicator() {
       const container = document.getElementById('chatMessages');
       const div = document.createElement('div');
@@ -5667,9 +6077,12 @@
       sendBtn.style.display = 'none';
       stopBtn.style.display = 'flex';
 
-      showTypingIndicator();
-
       _agentAbortController = new AbortController();
+
+      // 流式消息气泡 (思考框 + 正文 + 结果卡)
+      const stream = createStreamingMessage();
+      let finalResponse = '';
+      let finished = false;
 
       try {
         // 本地会话标识 (后端归因用): 本地生成持久化, 同一浏览器复用
@@ -5678,41 +6091,89 @@
             ? crypto.randomUUID()
             : 'sess-' + Date.now().toString(16) + Math.random().toString(16).slice(2, 10));
         }
-        const res = await fetch('/api/agent/query', {
+        const res = await fetch('/api/agent/query/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query: query, lang: currentLang, history: chatHistory,
                                  session_id: window._clientSessionId }),
           signal: _agentAbortController.signal
         });
-        const json = await res.json();
 
-        hideTypingIndicator();
-
-        if (json.success) {
-          var responseText = json.response || t('noData');
-          addMessage(responseText, 'agent', {
-            mode: json.mode,
-            is_table_related: json.is_table_related,
-            intent: json.intent,
-            search_results: json.search_results,
-            is_compare: json.is_compare,
-            compare_result: json.compare_result
-          });
-          // 维护多轮上下文
-          chatHistory.push({ role: 'user', content: query });
-          chatHistory.push({ role: 'assistant', content: responseText });
-          if (chatHistory.length > 24) chatHistory = chatHistory.slice(-24);
-        } else {
-          addMessage(t('requestFailed'), 'agent');
+        if (!res.ok || !res.body) {
+          throw new Error('stream HTTP ' + res.status);
         }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let sseBuffer = '';
+
+        const handleEvent = function(ev) {
+          if (!ev || !ev.type) return;
+          if (ev.type === 'stage') {
+            stream.setStage(ev.stage || '');
+          } else if (ev.type === 'thinking') {
+            stream.appendThinking(ev.delta || '');
+          } else if (ev.type === 'answer') {
+            finalResponse += (ev.delta || '');
+            stream.appendAnswer(ev.delta || '');
+          } else if (ev.type === 'result') {
+            // rule/compare 路径只发 result, 正文需从 ev.response 兜底填充
+            const resp = ev.response || '';
+            if (resp && !finalResponse) {
+              finalResponse = resp;
+              stream.appendAnswer(resp);
+            } else if (resp) {
+              finalResponse = resp;
+            }
+            stream.renderResult(ev);
+            finished = true;
+          } else if (ev.type === 'error') {
+            stream.appendAnswer(ev.message || t('requestFailed'));
+            stream.finish();
+            finished = true;
+          }
+        };
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          sseBuffer += decoder.decode(value, { stream: true });
+          let sep;
+          // SSE 事件以空行 (\n\n) 分隔
+          while ((sep = sseBuffer.indexOf('\n\n')) !== -1) {
+            const rawEvent = sseBuffer.slice(0, sep);
+            sseBuffer = sseBuffer.slice(sep + 2);
+            const dataLines = [];
+            rawEvent.split('\n').forEach(function(line) {
+              if (line.indexOf('data:') === 0) {
+                dataLines.push(line.slice(5).replace(/^\s/, ''));
+              }
+            });
+            if (!dataLines.length) continue;
+            try {
+              handleEvent(JSON.parse(dataLines.join('\n')));
+            } catch (parseErr) {
+              console.error('SSE parse error:', parseErr, dataLines);
+            }
+          }
+        }
+
+        if (!finished) {
+          if (!finalResponse) stream.appendAnswer(t('noData'));
+          stream.finish();
+        }
+
+        // 维护多轮上下文
+        chatHistory.push({ role: 'user', content: query });
+        chatHistory.push({ role: 'assistant', content: finalResponse || '' });
+        if (chatHistory.length > 24) chatHistory = chatHistory.slice(-24);
       } catch (e) {
-        hideTypingIndicator();
         if (e.name === 'AbortError') {
-          addMessage(currentLang === 'zh' ? '⏹ 已停止生成' : '⏹ Generation stopped', 'agent');
+          stream.appendAnswer(t('generationStopped'));
         } else {
-          addMessage(t('requestFailed'), 'agent');
+          stream.appendAnswer(t('requestFailed'));
         }
+        stream.finish();
         console.error('Agent query error:', e);
       } finally {
         sendBtn.disabled = false;
@@ -6335,6 +6796,8 @@
       loadColumns();
       loadAllPartNumbers();
       loadAgentStatus();
+      // 徽标每 30s 轮询一次, 避免引擎故障转移/恢复后显示过期模式
+      setInterval(loadAgentStatus, 30000);
       loadModels();
       renderSearchHistory();
 
@@ -6445,6 +6908,7 @@
           closeEditModal();
           hideAutocomplete();
           closeHomeDrilldown();
+          closeStatusDrilldown();
         }
       });
     });

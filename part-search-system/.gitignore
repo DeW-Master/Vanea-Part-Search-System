@@ -61,9 +61,13 @@ data/cloud_config.json
 data/llm_engine.json
 data/uploads/
 data/user_logs/
+data/sessions/
 *.db
 *.sqlite
 *.sqlite3
+
+# ---------- Redis 运行时快照 ----------
+dump.rdb
 
 # ---------- 备份 ----------
 backup/

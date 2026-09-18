@@ -28,3 +28,9 @@ loadtest_run*.log
 part-search-system/.trae/
 part-search-system/.vscode/
 part-search-system/frontend/.cache/
+
+# ---------- IDE 配置 ----------
+.idea/
+
+# ---------- Redis 运行时快照 ----------
+dump.rdb

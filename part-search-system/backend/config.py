@@ -7,17 +7,34 @@ van.ea 车辆零件智能查询系统 - 配置文件
 
 import os
 
+# 统一日志 (安全基线告警只写 logs/security.log, 不在控制台展示)
+from log_config import get_logger, security_logger
+_logger = get_logger("config")
+
 # ============ 基础路径 ============
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 DATA_DIR = os.path.join(PROJECT_ROOT, 'data')
 
 # ============ 版本信息 ============
-APP_VERSION = "build20260828"
+APP_VERSION = "build20260918"
 APP_NAME = "van.ea 车辆零件智能查询"
 APP_CODENAME = "van.ea"
 
 VERSION_HISTORY = [
+    {
+        "version": "build20260918",
+        "date": "2026-09-18",
+        "features": [
+            "🖥️ 终端控制台 console_ui.py：启动横幅 + 交互菜单，f 手动刷新服务状态 / r 重启 / s 停止 / x 退出菜单",
+            "🚀 Redis 随主服务自启：Windows 下连不上本机 Redis 时自动后台拉起 redis-server（REDIS_AUTOSTART=0 关闭）",
+            "⚡ F-Brain 问答 SSE 流式输出：思考/回答分段实时推送，前端逐字渲染",
+            "🧠 LLM 双引擎看门狗强化：vLLM 卡死经 WSL 自动重启、切换在途排空、在途调用实时监控",
+            "🐛 修复“本地算力却显示规则模式”：模式徽标返回实际承载引擎名 + 前端补 vLLM 映射 + 30s 轮询刷新",
+            "📋 统一日志体系 log_config.py：控制台彩色输出 + 文件归档",
+            "📡 新增 /api/agent/engine 双引擎状态接口（健康度/在途/切换历史）",
+        ]
+    },
     {
         "version": "build20260828",
         "date": "2026-08-28",
@@ -171,8 +188,9 @@ VLLM_API_KEY = os.environ.get("VLLM_API_KEY", "dummy")
 # vLLM 健康检查端点 (根路径, 非 /v1)
 VLLM_HEALTH_URL = os.environ.get("VLLM_HEALTH_URL", "http://localhost:8000/health")
 VLLM_REQUEST_TIMEOUT = int(os.environ.get("VLLM_REQUEST_TIMEOUT", "120"))
-# 引擎偏好: ollama | vllm (运行时可切换, 持久化到 DATA_DIR/llm_engine.json)
-LLM_ENGINE_PREFERRED = os.environ.get("LLM_ENGINE", "ollama").lower()
+# 引擎偏好: vllm | ollama (vLLM 优先, 故障时自动转移 Ollama, 再退化为规则模式;
+# 运行时可切换, 持久化到 DATA_DIR/llm_engine.json)
+LLM_ENGINE_PREFERRED = os.environ.get("LLM_ENGINE", "vllm").lower()
 # 看门狗: 健康检查间隔 / 连续失败判定 / 卡死重启
 LLM_WATCHDOG_INTERVAL = int(os.environ.get("LLM_WATCHDOG_INTERVAL", "15"))
 LLM_WATCHDOG_FAILURE_THRESHOLD = int(os.environ.get("LLM_WATCHDOG_FAILURE_THRESHOLD", "3"))
@@ -306,8 +324,8 @@ def _is_unset_default(name, value, default):
     return os.environ.get(name) is None and value == default
 
 if _is_unset_default("ADMIN_PASSWORD", ADMIN_PASSWORD, "admin2026"):
-    print("[SECURITY] WARNING: ADMIN_PASSWORD uses default 'admin2026'; set it via env var in production!")
+    security_logger.warning("ADMIN_PASSWORD uses default 'admin2026'; set it via env var in production!")
 if _is_unset_default("SECRET_KEY", SECRET_KEY, "parts-search-secret-key-2026"):
-    print("[SECURITY] WARNING: SECRET_KEY uses default; set a random key via env var in production!")
+    security_logger.warning("SECRET_KEY uses default; set a random key via env var in production!")
 if DB_TYPE == "postgresql":
-    print("[DB] Database engine: PostgreSQL")
+    _logger.info("Database engine: PostgreSQL")

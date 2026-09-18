@@ -20,6 +20,9 @@ from config import (
     METRICS_BASIC_AUTH_USER, METRICS_BASIC_AUTH_PASS,
     APP_VERSION, APP_CODENAME, INSTANCE_ID,
 )
+from log_config import get_logger
+
+logger = get_logger("metrics")
 
 
 class MetricsManager:
@@ -76,7 +79,7 @@ class MetricsManager:
             # 启用基础指标 (进程 + Python)
             pc.ProcessCollector(registry=self._registry)
         except ImportError:
-            print("[Metrics] prometheus_client not installed, metrics disabled")
+            logger.warning("prometheus_client not installed, metrics disabled", exc_info=True)
             self.enabled = False
 
     def _declare_metrics(self):
@@ -360,7 +363,7 @@ class MetricsManager:
             except Exception:
                 pass
         except Exception as e:
-            print(f"[Metrics] after_request error: {e}")
+            logger.warning("after_request error: %s", e, exc_info=True)
         return response
 
     def teardown_request(self, exc):
@@ -411,7 +414,7 @@ class MetricsManager:
             data = self._pc.generate_latest(self._registry)
             return Response(data, mimetype=self._pc.CONTENT_TYPE_LATEST)
 
-        print(f"[Metrics] endpoint registered: {endpoint_path}")
+        logger.info("endpoint registered: %s", endpoint_path)
 
     # ============== 对外 API: 业务指标 ==============
     def observe_redis(self, hit: bool):

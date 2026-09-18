@@ -38,6 +38,10 @@ from config import (
     LLM_SWITCH_DRAIN_TIMEOUT,
 )
 
+from log_config import get_logger
+
+logger = get_logger("llm_engine")
+
 try:
     from metrics import MetricsManager
     _metrics = MetricsManager()
@@ -54,9 +58,9 @@ ENGINE_VLLM = 'vllm'
 _VALID_ENGINES = (ENGINE_OLLAMA, ENGINE_VLLM)
 
 
-def _log(msg):
+def _log(msg, level="info"):
     """统一引擎日志前缀, 便于后台日志检索。"""
-    print(f"[LLMEngine] {msg}", flush=True)
+    getattr(logger, level, logger.info)("[LLMEngine] %s", msg)
 
 
 # GPU 指标缓存 (nvidia-smi 查询代价小, 但前端轮询频繁, 缓存 2s)
@@ -212,6 +216,16 @@ class BaseEngine:
         """多轮对话。messages: [{'role','content'}]; 返回 assistant 文本。"""
         raise NotImplementedError
 
+    def chat_stream(self, messages, system_prompt=None, temperature=0.3):
+        """流式多轮对话, 逐段 yield (kind, delta):
+        kind='thinking' 为思考增量, kind='answer' 为正文增量。
+        基类默认实现: 退化为非流式, 一次性返回全部正文 (无思考)。
+        """
+        content = self.chat(messages, system_prompt=system_prompt,
+                            temperature=temperature)
+        if content:
+            yield 'answer', content
+
     def list_models(self):
         """返回该引擎已注册可用模型名列表。"""
         return []
@@ -243,6 +257,11 @@ class OllamaEngine(BaseEngine):
 
     def chat(self, messages, system_prompt=None, temperature=0.3):
         return self._get_agent().chat(
+            messages, system_prompt=system_prompt, temperature=temperature
+        )
+
+    def chat_stream(self, messages, system_prompt=None, temperature=0.3):
+        return self._get_agent().chat_stream(
             messages, system_prompt=system_prompt, temperature=temperature
         )
 
@@ -303,7 +322,7 @@ class OllamaEngine(BaseEngine):
                 unloaded.append(name)
                 _log(f"已卸载 Ollama 模型释放显存: {name}")
             except Exception as e:
-                _log(f"卸载 Ollama 模型 {name} 失败: {e}")
+                _log(f"卸载 Ollama 模型 {name} 失败: {e}", level="warning")
         return unloaded
 
 
@@ -360,6 +379,61 @@ class VllmEngine(BaseEngine):
             raise RuntimeError(f"vLLM 返回空 choices: {str(data)[:200]}")
         content = (choices[0].get('message') or {}).get('content', '')
         return self._strip_think(content)
+
+    def chat_stream(self, messages, system_prompt=None, temperature=0.3):
+        """流式对话 (OpenAI 兼容 SSE), 开启思考。
+
+        逐段 yield ('thinking', delta) / ('answer', delta)。
+        服务端模板可能为 nonthinking 版, 此时无 reasoning_content, 仅有正文。
+        """
+        msgs = list(messages or [])
+        if system_prompt:
+            msgs.insert(0, {'role': 'system', 'content': system_prompt})
+        payload = {
+            'model': self.model,
+            'messages': msgs,
+            'temperature': temperature,
+            'stream': True,
+            # 流式问答开启思考 (非流式 NL2SQL 仍显式关闭, 互不影响)
+            'chat_template_kwargs': {'enable_thinking': True},
+            'stream_options': {'include_usage': False},
+        }
+        url = f"{self.base_url}/chat/completions"
+        body = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(url, data=body, method='POST')
+        req.add_header('Content-Type', 'application/json')
+        if self.api_key:
+            req.add_header('Authorization', f'Bearer {self.api_key}')
+        # 流式响应整体可能持续数分钟, 用较长读超时
+        with urllib.request.urlopen(req, timeout=max(VLLM_REQUEST_TIMEOUT, 180)) as resp:
+            yielded = False
+            for raw_line in resp:
+                if not raw_line:
+                    continue
+                line = raw_line.decode('utf-8', errors='ignore').strip()
+                if not line or not line.startswith('data:'):
+                    continue
+                data_str = line[5:].strip()
+                if data_str == '[DONE]':
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                except Exception:
+                    continue
+                choices = chunk.get('choices') or []
+                if not choices:
+                    continue
+                delta = choices[0].get('delta') or {}
+                reasoning = delta.get('reasoning_content')
+                if reasoning:
+                    yielded = True
+                    yield 'thinking', reasoning
+                content = delta.get('content')
+                if content:
+                    yielded = True
+                    yield 'answer', content
+            if not yielded:
+                raise RuntimeError("vLLM 流式返回为空")
 
     @staticmethod
     def _strip_think(text):
@@ -477,7 +551,7 @@ class EngineManager:
                 with open(_ENGINE_STATE_FILE, 'r', encoding='utf-8') as f:
                     return json.load(f).get('preferred', LLM_ENGINE_PREFERRED)
         except Exception as e:
-            _log(f"读取引擎状态文件失败: {e}")
+            _log(f"读取引擎状态文件失败: {e}", level="warning")
         return LLM_ENGINE_PREFERRED
 
     def _save_preferred(self):
@@ -488,7 +562,7 @@ class EngineManager:
                            'updated_at': datetime.now().isoformat()}, f,
                           ensure_ascii=False, indent=2)
         except Exception as e:
-            _log(f"写入引擎状态文件失败: {e}")
+            _log(f"写入引擎状态文件失败: {e}", level="warning")
 
     # ---------- 健康 ----------
     def _init_health(self):
@@ -540,7 +614,7 @@ class EngineManager:
             while self._switching:
                 self._switch_condition.wait(timeout=LLM_SWITCH_DRAIN_TIMEOUT + 5)
                 if self._switching:
-                    _log("等待引擎切换排空超时, 继续尝试当前引擎")
+                    _log("等待引擎切换排空超时, 继续尝试当前引擎", level="warning")
                     break
 
         # 2. 确定调用顺序: 首选优先, 备用兜底
@@ -562,7 +636,7 @@ class EngineManager:
                                          stage=stage)
             except Exception as e:
                 last_err = e
-                _log(f"引擎 {eng_name} 调用失败: {e}")
+                _log(f"引擎 {eng_name} 调用失败: {e}", level="warning")
                 if _metrics:
                     _metrics.set_llm_healthy(eng_name, False)
                 self._healthy[eng_name] = False
@@ -573,6 +647,113 @@ class EngineManager:
                 continue
 
         raise RuntimeError(f"所有 LLM 引擎均不可用: {last_err}")
+
+    def chat_stream(self, messages, system_prompt=None, temperature=0.3, stage=None):
+        """流式对话接口 (与 chat 同语义): 逐段 yield (kind, delta)。
+
+        - 切换期间同样在条件变量排队等待
+        - 故障转移仅允许在"首字节返回前": 一旦已有内容发给上层,
+          中途断流不能重放 (会造成重复输出), 直接向上抛出
+        """
+        with self._switch_condition:
+            while self._switching:
+                self._switch_condition.wait(timeout=LLM_SWITCH_DRAIN_TIMEOUT + 5)
+                if self._switching:
+                    _log("流式调用: 等待引擎切换排空超时, 继续尝试当前引擎",
+                         level="warning")
+                    break
+
+        order = [self.preferred]
+        for name in _VALID_ENGINES:
+            if name != self.preferred:
+                order.append(name)
+
+        last_err = None
+        for eng_name in order:
+            eng = self.engines.get(eng_name)
+            if eng is None:
+                continue
+            if eng_name != self.preferred and not self._healthy.get(eng_name, False):
+                continue
+            gen = self._call_engine_stream(
+                eng, messages, system_prompt, temperature, stage=stage)
+            started = False
+            try:
+                for item in gen:
+                    started = True
+                    yield item
+                return
+            except Exception as e:
+                last_err = e
+                if started:
+                    # 已有内容输出, 无法安全重放, 直接上抛
+                    raise
+                _log(f"引擎 {eng_name} 流式连接失败: {e}", level="warning")
+                if _metrics:
+                    _metrics.set_llm_healthy(eng_name, False)
+                self._healthy[eng_name] = False
+                self._fail_count[eng_name] = self._fail_count.get(eng_name, 0) + 1
+                if eng_name == self.preferred:
+                    self._handle_preferred_failure()
+                continue
+
+        raise RuntimeError(f"所有 LLM 引擎均不可用(流式): {last_err}")
+
+    def _call_engine_stream(self, engine, messages, system_prompt, temperature,
+                            stage=None):
+        """在指定引擎上执行流式调用, 维护在途计数/登记表/指标 (生成器)。"""
+        eng_name = engine.name
+        trace = get_request_trace() or {}
+        rid = None
+        with self._inflight_lock:
+            self._inflight[eng_name] += 1
+            self._inflight_seq += 1
+            rid = self._inflight_seq
+            self._inflight_requests[rid] = {
+                'rid': rid,
+                'engine': eng_name,
+                'stage': stage or 'LLM 流式调用',
+                'session_id': trace.get('session_id', ''),
+                'ip': trace.get('ip', ''),
+                'query': trace.get('query', ''),
+                'prompt_chars': _estimate_prompt_tokens(messages),
+                'start_time': time.time(),
+            }
+            if _metrics:
+                _metrics.set_llm_inflight(eng_name, self._inflight[eng_name])
+        t0 = time.time()
+        success = False
+        try:
+            first = True
+            for kind, delta in engine.chat_stream(
+                    messages, system_prompt=system_prompt,
+                    temperature=temperature):
+                if first:
+                    # 首字节到达 = 连接与生成正常, 恢复健康标记
+                    first = False
+                    success = True
+                    self._healthy[eng_name] = True
+                    self._fail_count[eng_name] = 0
+                    self._request_total[eng_name] = \
+                        self._request_total.get(eng_name, 0) + 1
+                    if _metrics:
+                        _metrics.set_llm_healthy(eng_name, True)
+                yield kind, delta
+        except Exception:
+            self._request_total[eng_name] = self._request_total.get(eng_name, 0) + 1
+            self._request_failed[eng_name] = \
+                self._request_failed.get(eng_name, 0) + 1
+            raise
+        finally:
+            dur = time.time() - t0
+            with self._inflight_lock:
+                self._inflight[eng_name] = max(0, self._inflight[eng_name] - 1)
+                self._inflight_requests.pop(rid, None)
+                if _metrics:
+                    _metrics.set_llm_inflight(eng_name, self._inflight[eng_name])
+            model = getattr(engine, 'model', None) or OLLAMA_MODEL
+            if _metrics:
+                _metrics.observe_llm_request(eng_name, str(model), success, dur)
 
     def _call_engine(self, engine, messages, system_prompt, temperature, stage=None):
         """在指定引擎上执行一次调用, 维护在途计数、请求登记表与指标。"""
@@ -627,7 +808,7 @@ class EngineManager:
         """首选引擎调用失败: 若备用健康则自动转移 active。"""
         backup = ENGINE_VLLM if self.preferred == ENGINE_OLLAMA else ENGINE_OLLAMA
         if self._healthy.get(backup, False):
-            _log(f"首选引擎 {self.preferred} 故障, 自动转移到 {backup}")
+            _log(f"首选引擎 {self.preferred} 故障, 自动转移到 {backup}", level="warning")
             self._set_active(backup, reason='auto_failover')
 
     # ---------- 无缝切换 ----------
@@ -670,7 +851,7 @@ class EngineManager:
                 waited += interval
             remaining = self._inflight.get(old, 0)
             if remaining > 0:
-                _log(f"排空等待 {waited:.1f}s 后仍有 {remaining} 个在途请求, 强制切换")
+                _log(f"排空等待 {waited:.1f}s 后仍有 {remaining} 个在途请求, 强制切换", level="warning")
 
             # 3. 执行切换
             self.preferred = target
@@ -718,7 +899,7 @@ class EngineManager:
             if unloaded:
                 _log(f"Ollama 显存释放完成, 卸载模型: {unloaded}")
         except Exception as e:
-            _log(f"释放 Ollama 显存异常 (不影响切换): {e}")
+            _log(f"释放 Ollama 显存异常 (不影响切换): {e}", level="warning")
 
     def _free_vram_before_restart(self):
         """看门狗重启 vLLM 前: 同步卸载 Ollama 模型并等待显存归还。
@@ -753,9 +934,9 @@ class EngineManager:
                     # 无 GPU 指标 (nvidia-smi 不可用), 卸载后固定等 5s 即可
                     if i >= 2:
                         return
-            _log("等待显存归还超时, 仍尝试重启 vLLM (脚本会按实际空闲显存动态计算 util)")
+            _log("等待显存归还超时, 仍尝试重启 vLLM (脚本会按实际空闲显存动态计算 util)", level="warning")
         except Exception as e:
-            _log(f"重启前释放 Ollama 显存异常 (继续重启): {e}")
+            _log(f"重启前释放 Ollama 显存异常 (继续重启): {e}", level="warning")
 
     # ---------- 看门狗 ----------
     def _start_watchdog(self):
@@ -796,7 +977,7 @@ class EngineManager:
                     else:
                         self._fail_count[name] = self._fail_count.get(name, 0) + 1
                         fails = self._fail_count[name]
-                        _log(f"引擎 {name} 健康检查失败 ({fails}/{LLM_WATCHDOG_FAILURE_THRESHOLD})")
+                        _log(f"引擎 {name} 健康检查失败 ({fails}/{LLM_WATCHDOG_FAILURE_THRESHOLD})", level="warning")
 
                         # 连续失败达阈值:
                         #  - 若该引擎正承载流量 -> 故障转移到备用
@@ -806,7 +987,7 @@ class EngineManager:
                                 backup = ENGINE_VLLM if name == ENGINE_OLLAMA else ENGINE_OLLAMA
                                 if self.engines[backup].health_check():
                                     self._set_active(backup, reason='watchdog_failover')
-                                    _log(f"看门狗: {name} 故障, 转移到 {backup}")
+                                    _log(f"看门狗: {name} 故障, 转移到 {backup}", level="warning")
                             if name == ENGINE_VLLM and VLLM_RESTART_ENABLED:
                                 with self._recovery_lock:
                                     self._vllm_recovery['state'] = 'restarting'
@@ -824,7 +1005,7 @@ class EngineManager:
                             self._vllm_recovery['message'] = 'vLLM 已恢复'
                         _log("vLLM 恢复完成, 恢复状态结束")
             except Exception as e:
-                _log(f"看门狗循环异常: {e}")
+                _log(f"看门狗循环异常: {e}", level="warning")
 
             self._watchdog_stop.wait(LLM_WATCHDOG_INTERVAL)
 
@@ -870,13 +1051,13 @@ class EngineManager:
                     if _metrics:
                         _metrics.set_llm_healthy(ENGINE_VLLM, self._healthy[ENGINE_VLLM])
                 except Exception as e:
-                    _log(f"vLLM 重启等待异常: {e}")
+                    _log(f"vLLM 重启等待异常: {e}", level="warning")
                     if _metrics:
                         _metrics.inc_llm_restart(ENGINE_VLLM, 'failed')
 
             threading.Thread(target=_wait, name='vllm-restart', daemon=True).start()
         except Exception as e:
-            _log(f"vLLM 重启失败: {e}")
+            _log(f"vLLM 重启失败: {e}", level="warning")
             if _metrics:
                 _metrics.inc_llm_restart(ENGINE_VLLM, 'failed')
 

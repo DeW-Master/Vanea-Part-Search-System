@@ -16,7 +16,13 @@ docker-compose up -d --build
 ```
 
 ### Windows 原生方式
-双击根目录的 `启动系统.bat`，访问 http://localhost:5000
+```bash
+cd part-search-system/backend
+python app.py
+# 访问 http://localhost:5000
+```
+启动后进入终端控制台（console_ui）：`f` 手动刷新服务状态、`r` 重启、`s` 停止、`x` 退出菜单（服务继续后台运行）。
+本机 Redis 未启动时随主服务自动拉起（`REDIS_AUTOSTART=0` 关闭，`REDIS_SERVER_PATH` 指定 exe 路径）；Ollama 需手动 `ollama serve`。
 
 ---
 
@@ -24,22 +30,25 @@ docker-compose up -d --build
 
 ```
 part-search-system/
-├── 启动系统.bat             ⭐ 主入口
 ├── docker-compose.yml      Docker 编排
 ├── Dockerfile              Docker 构建
 ├── .env.example            环境变量示例
-├── DEPLOYMENT.md           部署文档
 ├── PROJECT_CONTEXT.md      本文件
 │
 ├── backend/                Python 后端
-│   ├── app.py              Flask 主应用
+│   ├── app.py              Flask 主应用 + Redis 自启 + 终端控制台装配
+│   ├── console_ui.py       终端控制台（横幅 / 菜单 / 服务状态探测）
 │   ├── config.py           配置文件 + 版本历史
 │   ├── database.py         数据库层 + Delta 计算
-│   ├── agent.py            AI 智能体
-│   ├── llm_engine.py       LLM 引擎 (vLLM/Ollama 双引擎)
+│   ├── agent.py            AI 智能体（规则 + 双引擎 + 云端三层）
+│   ├── llm_engine.py       LLM 双引擎管理（路由/故障转移/看门狗/在途监控）
+│   ├── ollama_lb.py        Ollama 多实例负载均衡
+│   ├── metrics.py          Prometheus 指标
+│   ├── leader_election.py  多副本领导者选举
+│   ├── log_config.py       统一日志体系
 │   ├── user_log.py         用户操作日志
-│   ├── models/             领域模型 (Part / Catalog)
-│   ├── tests/              单元测试
+│   ├── models/             领域模型 (Part)
+│   ├── tests/              单元/集成/负载测试
 │   └── requirements.txt    Python 依赖
 │
 ├── frontend/               前端静态文件
@@ -50,16 +59,18 @@ part-search-system/
 │   └── logo.png
 │
 ├── scripts/                运维脚本
-│   ├── windows/            6个 Windows bat 脚本
-│   └── deploy/             部署辅助脚本
+│   ├── vllm/               vLLM WSL2 部署（服务脚本/模型下载/环境安装）
+│   ├── install-hooks.bat   git hooks 安装
+│   ├── pre-push            pre-push 钩子（自动刷新 README 构建状态）
+│   └── update_readme.py    README 构建状态更新脚本
 │
-├── nginx/                  Nginx 配置
-│   └── nginx.conf
+├── monitoring/             Prometheus + Grafana 配置
 │
 └── data/                   运行时数据（持久化）
-    ├── parts.db            主数据库
     ├── parts_data.xlsm     原始数据
-    ├── cloud_config.json   云端配置
+    ├── parts.db            主数据库（SQLite）
+    ├── cloud_config.json   云端配置（不入库）
+    ├── llm_engine.json     LLM 首选引擎持久化
     └── uploads/            上传文件
 ```
 
@@ -73,7 +84,10 @@ part-search-system/
 | 🔍 零件搜索 | PN模糊搜索 / 字段搜索 / 复杂条件 / 导出 | ✅ |
 | 📊 阶段 Delta | pre-TO/TO1/TO2 三阶段 PN+ZGS 组合对比 · 双区下钻 (BOM原始列 + ENIGMA参考) | ✅ |
 | 🔬 Part.compare() | 零 hardcoding 逐字段对比，支持任意两阶段 BOM 数据对比 | ✅ |
-| 🤖 F-Brain 智能体 | 规则引擎 + Ollama + 云端 API 三层架构 | ✅ |
+| 🤖 F-Brain 智能体 | 规则引擎 + Ollama/vLLM 双引擎 + 云端 API 三层架构，SSE 流式问答 | ✅ |
+| 🧠 LLM 双引擎 | vLLM/Ollama 自动路由、故障转移、看门狗自动重启、切换在途排空、在途监控 | ✅ |
+| 🖥️ 终端控制台 | 启动横幅 + 交互菜单（f 刷新状态 / r 重启 / s 停止 / x 退菜单） | ✅ |
+| 🚀 Redis 自启 | Windows 本机 Redis 未运行时随主服务自动后台拉起 | ✅ |
 | ⚙️ 管理后台 | 数据导入 / 列配置 / 云端配置 / 缓存管理 / 实时监控 | ✅ |
 | 📈 实时监控 | 在途调用 9 列 · 用户日志 · 系统状态 (admin 专属) | ✅ |
 
@@ -116,25 +130,32 @@ part-search-system/
 ## 架构总览
 
 ```
-                    Nginx :80
+                    Nginx :80 (Docker 部署时)
           (静态加速 / gzip / 安全头)
                        │
                        ▼
-              Flask App :5000
+              Flask App :5000 ── 终端控制台 (console_ui)
           ┌──────────────┴──────────────┐
           │                             │
     Homepage/Dashboard            Search/Delta
           │                             │
           └──────────────┬──────────────┘
                          │
-              Database Manager (SQLite)
+              Database Manager (SQLite/PostgreSQL)
                          │
               ┌──────────┴──────────┐
               │   Redis Cache       │  ← 可选，自动降级
-              │  (查询/Delta缓存)   │
+              │  (查询/Delta缓存,   │     Windows 本机随主服务自启
+              │   Session/Leader)   │
               └─────────────────────┘
                          │
-              Ollama AI :11434 (可选)
+              LLM 双引擎管理器 (llm_engine)
+               ┌─────────┴─────────┐
+               │                   │
+        Ollama :11434        vLLM :8000 (WSL2)
+        (LB 多实例轮询)       (看门狗守护/卡死自动重启)
+               │                   │
+        规则引擎回退 (NL2SQL 失败或无 LLM 时)
 ```
 
 ---
@@ -152,23 +173,28 @@ part-search-system/
 | **Delta** | `GET /api/delta/dashboard` | Dashboard 数据 |
 | | `GET /api/delta` | Delta 列表（分页） |
 | **AI** | `POST /api/agent/query` | 问答（SSE 流式） |
-| | `GET /api/agent/status` | 智能体状态 |
+| | `GET /api/agent/status` | 智能体状态（模式/后端/引擎） |
+| | `GET /api/agent/engine` | 双引擎状态（健康度/在途/切换历史） |
 | **管理** | `POST /api/admin/import` | 导入数据 |
 | | `POST /api/admin/cache/clear` | 清空缓存 |
 | **系统** | `GET /api/health` | 健康检查 |
 | | `GET /api/version` | 版本信息 |
+| | `GET /metrics` | Prometheus 指标 |
 
 ---
 
 ## 关键优化
 
+- ✅ **LLM 双引擎**: vLLM/Ollama 自动路由 + 故障转移 + 看门狗自动重启，切换在途排空，模式徽标返回实际承载引擎
+- ✅ **终端控制台**: 服务状态按需手动查看（f），不做自动刷屏；r 重启 / s 停止 / x 退菜单后服务继续后台运行
+- ✅ **Redis 自启**: Windows 下连不上本机 Redis 时自动后台拉起 redis-server，进程脱离控制台存活
+- ✅ **SSE 流式问答**: F-Brain 思考/回答分段实时推送，前端逐字渲染
 - ✅ **Part.compare() 零 hardcoding**: 纯字段逐字段对比，支持任意两阶段 / 任意 BOM 结构
 - ✅ **数据分层架构**: BOM 原始数据与 ENIGMA 参考数据严格分离，下钻双区展示
-- ✅ **多副本部署**: 支持 Docker Swarm / k8s 多实例部署，Redis 统一 Session
+- ✅ **多副本部署**: 支持 Docker Swarm / k8s 多实例部署，Redis 统一 Session + 领导者选举
 - ✅ **Ollama 负载均衡**: 多节点轮询 + 自动故障转移
 - ✅ **全方位监控**: 集成 Prometheus 指标端点 + admin 专属实时监控页
 - ✅ **数据库**: 双引擎支持（SQLite 默认 / PostgreSQL 可选）
-- ✅ **Nginx 反向代理**: 静态文件加速 + 负载均衡配置
 - ✅ **性能加速**: Redis 缓存层 + Delta 预计算后台线程
 - ✅ **安全性**: 移除前端版本号显示，采用 build 日志追溯
 - ✅ **用户审计**: JSONL 格式按 IP 分文件日志，支持查询历史与错误追溯
@@ -184,9 +210,17 @@ part-search-system/
 | `ADMIN_PASSWORD` | admin2026 | 管理员密码 |
 | `FLASK_PORT` | 5000 | 监听端口 |
 | `REDIS_URL` | redis://localhost:6379/0 | Redis 地址 |
+| `REDIS_AUTOSTART` | 1 | Windows 本机 Redis 随主服务自动拉起（0 关闭） |
+| `REDIS_SERVER_PATH` | (PATH 查找) | redis-server.exe 完整路径 |
 | `CACHE_ENABLED` | true | 缓存开关 |
 | `DELTA_REFRESH_INTERVAL` | 300 | Delta 刷新间隔（秒） |
 | `OLLAMA_URL` | http://localhost:11434 | Ollama 地址 |
+| `LLM_ENGINE` | vllm | LLM 首选引擎（vllm/ollama），故障自动转移恢复自动切回 |
+| `VLLM_URL` | http://localhost:8000/v1 | vLLM OpenAI 兼容地址（WSL2） |
+| `VLLM_MODEL` | qwen3-8b | vLLM 模型名 |
+| `LLM_WATCHDOG_INTERVAL` | 15 | 引擎健康检查间隔（秒） |
+| `LLM_WATCHDOG_FAILURE_THRESHOLD` | 3 | 连续失败判定阈值 |
+| `VLLM_RESTART_ENABLED` | 1 | vLLM 卡死经 WSL 自动重启 |
 
 ---
 
